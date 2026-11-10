@@ -1,0 +1,40 @@
+# Canonical descriptor for the rig plugin: edit here, never plugin.json.
+# Projects into .claude-plugin/plugin.json (via shipyard gen-plugin-json) and
+# the marketplace SPA (the suite: block).
+
+name: rig
+version: 0.0.0
+description: "Launch Claude Code with a named set of plugins, your local plugin checkouts pinned in, and the sandbox when you want it."
+author: chris-peterson
+repository: https://github.com/chris-peterson/rig
+icon: .claude-plugin/icon.svg
+keywords: [plugins, launcher, sandbox, local-development, claude-code]
+license: MIT
+
+validate:
+  accept:
+    - warning: root
+      path: CLAUDE.md
+      because: >-
+        CLAUDE.md at the root is this repo's own agent instructions, not context
+        the plugin ships. It is the @AGENTS.md pointer.
+
+# → marketplace.json entry
+marketplace:
+  category: development
+  homepage: https://chris-peterson.github.io/rig/#/
+
+# → marketplace SPA; keys mirror the SPA's PLUGINS object.
+suite:
+  cli: true
+  group: bearings
+  gloss: "rig: pick the plugins for the job."
+  pitch: "Different work, different plugins? Name the set once and launch with it."
+  what: "A rig is a named set of plugins chosen for a kind of work. rig launches Claude Code with the rig you name, loads the plugin checkouts you've pinned so your edits take effect without a release, and turns on the sandbox for a launch or a rig that asks for it."
+  # >>> shipyard:describe — generated from source by `shipyard gen-describe`; do not edit >>>
+  describe: {}
+  # <<< shipyard:describe <<<
+
+docs:
+  code_languages: [bash, yaml, markdown]
+  mermaid: true

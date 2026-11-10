@@ -1,0 +1,10 @@
+# docs/ is rendered by `just docs` / CI (shipyard build-docs); only the
+# hand-authored pages negated below are tracked, so a page shipyard adds later
+# stays ignored without editing this list.
+docs/*
+!docs/README.md
+!docs/_sidebar.md
+!docs/favicon.svg
+
+__pycache__
+.DS_Store

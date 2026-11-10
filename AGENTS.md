@@ -1,0 +1,44 @@
+# rig
+
+A Claude Code plugin and CLI that launches Claude Code with a named set of
+plugins (a rig), the local plugin checkouts you've pinned, and the sandbox when
+a launch or a rig asks for it. What it does for a *user* lives on the docs site
+(https://chris-peterson.github.io/rig); this file is for working on rig itself.
+
+rig is spec-driven. `SPEC.md` is the requirement source of record and
+`STATUS.md` its coverage ledger, both maintained with sextant
+(`/sextant:spec-req`, `/sextant:spec-status`). A change to behavior updates the
+requirement and the ledger in the same commit.
+
+## Commands
+
+```bash
+just generate         # regenerate plugin.json and docs/ from plugin.yml and the sources
+just check-generated  # generate, then show what it wrote
+just docs             # render the docsify site and serve it locally
+```
+
+The recipes run shipyard straight from its git ref via `uvx`, so there is
+nothing to install. They are for seeing the projection before you push; CI is
+the writer for what lands.
+
+## Layout
+
+```text
+plugin.yml               canonical descriptor: manifest, marketplace entry, docs previews
+SPEC.md / STATUS.md      rig's requirements and their coverage
+docs/                    docsify site; the tracked pages and sidebar are source
+```
+
+`.claude-plugin/plugin.json`, `plugin.yml`'s `suite.describe` block, and most of
+`docs/` are **generated** by shipyard from the sources above. Never hand-edit a
+generated file; edit its source and run `just generate`.
+
+Releases are dispatched, not tagged by hand: run the **Release** workflow with a
+bump level, and shipyard derives the version from `plugin.yml`, retitles
+`CHANGELOG.md`'s `## Unreleased` section, commits, tags that commit, and
+publishes. Write the notes into `## Unreleased` first.
+
+## Glossary
+
+The spec's Concepts section defines rig, pin, sandbox, and launch.

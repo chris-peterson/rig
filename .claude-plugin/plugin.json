@@ -1,0 +1,20 @@
+{
+  "name": "rig",
+  "version": "0.0.0",
+  "description": "Launch Claude Code with a named set of plugins, your local plugin checkouts pinned in, and the sandbox when you want it.",
+  "author": {
+    "name": "chris-peterson"
+  },
+  "repository": "https://github.com/chris-peterson/rig",
+  "license": "MIT",
+  "keywords": [
+    "plugins",
+    "launcher",
+    "sandbox",
+    "local-development",
+    "claude-code"
+  ],
+  "homepage": "https://chris-peterson.github.io/rig/#/",
+  "icon": ".claude-plugin/icon.svg",
+  "documentationUrl": "https://chris-peterson.github.io/rig/#/"
+}
