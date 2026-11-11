@@ -1469,7 +1469,7 @@ def check_rig_completion(probe: dict[str, str]) -> Check:
         return False, f"a new zsh doesn't have {display(COMPLETION_DIR)} on fpath", FIX_INSTALL
     if not same_file(found, target):
         return False, f"a new zsh loads _rig from {display(found)} first", f"remove {display(found)}"
-    insecure = [display(d) for d in probe.get("insecure", "").split(",") if d]
+    insecure = list(dict.fromkeys(display(d) for d in probe.get("insecure", "").split(",") if d))
     if probe.get("compinit") != "1" and insecure:
         return (False, f"compinit refused directories others can write to: {', '.join(insecure)}",
                 f"chmod go-w {' '.join(insecure)}")

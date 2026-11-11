@@ -480,6 +480,9 @@ class Doctor(RigCase):
         super().setUp()
         rest = [p for p in self.env["PATH"].split(os.pathsep) if not (Path(p) / "rig").exists()]
         self.env["PATH"] = os.pathsep.join([str(self.home / ".local" / "bin"), *rest])
+        # CI images can ship group-writable system completion directories, which make a plain
+        # compinit abort; -u keeps that machine detail out of the checks under test.
+        (self.home / ".zshrc").write_text("autoload -Uz compinit && compinit -u\n")
 
     def plugin_build(self, version: str) -> Path:
         script = self.home / ".claude" / "plugins" / "cache" / "m" / "rig" / version / "scripts" / "rig"
@@ -579,10 +582,12 @@ class Doctor(RigCase):
         self.assertIn("✓ zsh completes rig", self.rig("doctor").stdout)
 
     def test_doctor_03_group_writable_completion_dir(self):
+        (self.home / ".zshrc").write_text("autoload -Uz compinit && compinit\n")
         self.rig("install-cli")
         (self.home / ".zsh" / "completions").chmod(0o775)
-        self.assertIn("✗ compinit refused directories others can write to: ~/.zsh/completions\n"
-                      "      fix: chmod go-w ~/.zsh/completions\n", self.rig("doctor").stdout)
+        output = self.rig("doctor").stdout
+        self.assertRegex(output, r"✗ compinit refused directories others can write to: .*~/\.zsh/completions")
+        self.assertRegex(output, r"fix: chmod go-w .*~/\.zsh/completions")
 
     def test_doctor_03_claude_not_completed_as_rig(self):
         self.assertIn("✗ zsh doesn't complete claude as rig", self.rig("doctor").stdout)
