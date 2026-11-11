@@ -8,6 +8,9 @@ default:
     @echo ""
     @echo "  rig: launch Claude Code with a named set of plugins"
     @echo ""
+    @echo "  New here?   just demo         see what each launch hands Claude Code"
+    @echo "  Try it?     just run list     run rig from this checkout"
+    @echo ""
     @just --list --unsorted --list-heading '' --list-prefix '    '
     @echo ""
     @echo "  Generated files are written by CI on PRs and main; edit the source, not the output."
@@ -17,6 +20,12 @@ default:
 [group('start here')]
 demo:
     @uv run --quiet --with pyyaml python dev/demo.py
+
+# run rig from this checkout against your real setup: just run list
+[group('start here')]
+[positional-arguments]
+run *args:
+    @uv run --quiet --script scripts/rig "$@"
 
 # preview the docsify docs site locally
 [group('start here')]
@@ -29,6 +38,11 @@ docs:
 test:
     uv run --quiet --with pyyaml python -m unittest discover -s tests
 
+# run claude plugin validate with plugin.yml's acceptances, as the projection job does
+[group('check your work')]
+check:
+    {{shipyard}} validate
+
 # project source into the generated artifacts (plugin.json, describe, docs)
 [group('generated files')]
 generate:
@@ -39,8 +53,3 @@ generate:
 check-generated:
     {{shipyard}} generate
     git --no-pager diff --stat
-
-# run claude plugin validate with plugin.yml's acceptances, as the projection job does
-[group('generated files')]
-validate:
-    {{shipyard}} validate

@@ -196,12 +196,12 @@ class Rigs(RigCase):
         self.assertIn("no rig named nope. Rigs: base, web", result.stderr)
         self.assertEqual(self.claude_calls(), [])
 
-    def test_rig_07_bare_rig_uses_default(self):
+    def test_rig_06_bare_rig_uses_default(self):
         result = self.rig()
         self.assertIn("rig: base, 2 plugins", result.stderr)
         self.assertEqual(self.launched()[1], [])
 
-    def test_rig_09_list(self):
+    def test_rig_07_list(self):
         result = self.rig("list")
         self.assertEqual(result.stdout, textwrap.dedent("""\
             base (default)
@@ -211,28 +211,28 @@ class Rigs(RigCase):
               plugins: c@n
             """))
 
-    def test_rig_11_missing_plugin_refused_headless(self):
+    def test_rig_09_missing_plugin_refused_headless(self):
         self.write_installed("a@m")
         result = self.rig("-p", "hi")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("b@m", result.stderr)
         self.assertEqual(self.claude_calls(), [])
 
-    def test_rig_10_missing_plugin_installed_after_yes(self):
+    def test_rig_08_missing_plugin_installed_after_yes(self):
         self.write_installed("a@m")
         status, _ = self.rig_tty(answers="y\n")
         self.assertEqual(status, 0)
         self.assertEqual(self.claude_calls()[0], ["plugin", "install", "b@m"])
         self.assertEqual(self.claude_calls()[1][0], "--settings")
 
-    def test_rig_10_missing_plugin_refused_after_no(self):
+    def test_rig_08_missing_plugin_refused_after_no(self):
         self.write_installed("a@m")
         status, output = self.rig_tty(answers="n\n")
         self.assertNotEqual(status, 0)
         self.assertIn("launch refused: b@m isn't installed", output)
         self.assertEqual(self.claude_calls(), [])
 
-    def test_rig_10_project_scope_install_counts(self):
+    def test_rig_08_project_scope_install_counts(self):
         project = self.home / "proj"
         project.mkdir()
         self.write_installed("a@m", project={"b@m": project})
@@ -551,7 +551,7 @@ class Sandbox(RigCase):
         self.assertNotIn("sandbox", self.launched()[0])
         self.assertTrue(result.stderr.endswith("pins: none\nsandbox: off\n"), result.stderr)
 
-    def test_rig_09_list_shows_sandbox(self):
+    def test_rig_07_list_shows_sandbox(self):
         self.assertIn("locked\n  extends: base\n  plugins: none\n  sandbox: on\n", self.rig("list").stdout)
 
 

@@ -15,6 +15,8 @@ requirement and the ledger in the same commit.
 ```bash
 just test             # run the test suite, including completion parity
 just demo             # run rig against a throwaway HOME and a stand-in claude
+just run <args>       # run rig from this checkout against your real setup
+just check            # claude plugin validate, as the projection job runs it
 just generate         # regenerate plugin.json and docs/ from plugin.yml and the sources
 just check-generated  # generate, then show what it wrote
 just docs             # render the docsify site and serve it locally

@@ -215,7 +215,7 @@ def overlay(rig_ids: list[str], known: set[str], sandbox: bool) -> dict:
 
 
 def install_missing(name: str, plugins: list[str], cwd: Path, args: list[str]) -> None:
-    """RIG-10, RIG-11: install a rig's missing plugins once the user agrees, or refuse the launch."""
+    """RIG-08, RIG-09: install a rig's missing plugins once the user agrees, or refuse the launch."""
     missing = [p for p in plugins if p not in installed_for(cwd)]
     if not missing:
         return
@@ -234,7 +234,7 @@ def settings_flag(args: list[str]) -> bool:
 
 
 def launch(name: str | None, args: list[str]) -> None:
-    """RIG-04, RIG-05, RIG-07, LAUNCH-01..03, SANDBOX-01..02."""
+    """RIG-04, RIG-05, RIG-06, LAUNCH-01..03, SANDBOX-01..02."""
     sandbox_flag, args = take_sandbox_flag(args)
     if settings_flag(args):
         fail("rig starts Claude Code with its own --settings, and a second --settings replaces the first. "
@@ -278,7 +278,7 @@ def cmd_use(args: list[str]) -> int:
 
 
 def cmd_list(args: list[str]) -> int:
-    """RIG-09."""
+    """RIG-07."""
     if args:
         fail("list takes no arguments.")
     config = load_config()

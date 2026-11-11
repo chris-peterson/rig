@@ -51,35 +51,20 @@ plugins as the only plugins enabled, apart from pins.
 When the user runs `rig use <name>`, the system shall launch Claude Code with
 the named rig.
 
-#### ~~`RIG-06`~~
-~~When the user runs `rig <name>` and `<name>` is not one of rig's commands, the
-system shall launch Claude Code with the named rig.~~
-
-_Retired 2026-11-10: a prompt is more common than a rig name, so a bare first
-word goes to Claude Code (LAUNCH-03) and a rig is named with `rig use`
-(RIG-05). The ID is not reused._
-
-#### `RIG-07`
+#### `RIG-06`
 When the user runs `rig` with no rig named, the system shall launch Claude Code
 with the default rig.
 
-#### ~~`RIG-08`~~
-~~If a rig's name matches one of rig's commands, then the system shall reject the
-definition, naming the clash.~~
-
-_Retired 2026-11-10: with RIG-06 retired, a rig name only follows `use`, so it
-can't clash with a command. The ID is not reused._
-
-#### `RIG-09`
+#### `RIG-07`
 When the user runs `rig list`, the system shall list each rig with its plugins
 and the rigs it extends or includes.
 
-#### `RIG-10`
+#### `RIG-08`
 If a rig names a plugin that is not installed, then the system shall offer to
 install it, launch only after the user confirms, and refuse the launch if the
 user declines.
 
-#### `RIG-11`
+#### `RIG-09`
 If a rig names a plugin that is not installed and no one is at a terminal to
 confirm, then the system shall refuse the launch, naming the plugin.
 

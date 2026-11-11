@@ -13,7 +13,7 @@ Maintained by `/sextant:spec-status`.
 
 | Prefix | Count | Status | Notes |
 |--------|------:|--------|-------|
-| RIG-01..11 | 9 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. RIG-06 and RIG-08 retired. RIG-04 is a per-launch `--settings` overlay of `enabledPlugins`, which outranks user and project settings (verified 2026-11-10) |
+| RIG-01..09 | 9 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. RIG-04 is a per-launch `--settings` overlay of `enabledPlugins`, which outranks user and project settings (verified 2026-11-10) |
 | SETUP-01..06 | 8 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. Includes SETUP-04a..b. SETUP-04a reads the settings file as text, since the blank lines don't survive a JSON parse. `claude plugin disable` rewrites the file without them (verified 2026-11-10, Claude Code project scope), so the groups last only in a file edited by hand |
 | PIN-01..10 | 10 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. PIN-08 uses `--plugin-dir`: the checkout loads as `<name>@inline` and the installed copy doesn't load, including when the overlay disables it (verified 2026-11-10) |
 | SANDBOX-01..02 | 2 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. The overlay carries ai-sdlc's strict sandbox block; a launch on a machine without the sandbox hasn't been tried |
@@ -22,6 +22,13 @@ Maintained by `/sextant:spec-status`.
 | TAB-01..06 | 6 | All Covered | `scripts/rig` (`ZSH_COMPLETION`); tests check parity, zsh syntax, and the awk readers. Not yet exercised in a live shell |
 
 ## Audit history
+
+### 2026-11-10: Retired RIG requirements removed, RIG renumbered
+
+The retired RIG-06 and RIG-08 are gone from SPEC.md, and the RIG IDs after them
+moved down: RIG-07 → RIG-06, RIG-09 → RIG-07, RIG-10 → RIG-08, RIG-11 →
+RIG-09. Entries below this one use the old numbers. Coverage unchanged at 43 of
+43.
 
 ### 2026-11-10: Coverage refresh (spec-status)
 
