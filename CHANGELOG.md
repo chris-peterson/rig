@@ -2,9 +2,10 @@
 
 ## Unreleased
 
-- `rig` launches Claude Code with the default rig, and `rig use <name>` with a
-  named one: the rig's plugins, and the plugins of the rigs it extends, are the
-  only ones enabled for that session. Your Claude Code settings are unchanged.
+- `claude` launches Claude Code with the default rig, and `rig use <name>` with
+  a named one: the rig's plugins, and the plugins of the rigs it extends, are
+  the only ones enabled for that session. Your Claude Code settings are
+  unchanged. `rig` on its own prints its usage.
 - Arguments rig doesn't recognize go to Claude Code unchanged, so prompts and
   flags work as they do with `claude`. Claude Code's own subcommands
   (`rig plugin list`, `rig mcp`) run without a rig.
@@ -16,10 +17,16 @@
   enable and suggesting draft rigs for the rest.
 - `rig pin <path|name>` makes a local plugin checkout stand in for the
   installed copy in rigs that use it. `rig unpin` undoes it, and a bare
-  `rig pin` lists the pins.
+  `rig pin` lists the pins. A launch inside a pinned checkout, or from a
+  folder that holds one, sets `CLAUDE_CODE_AUTO_MODE_SERVER=0`, since auto
+  mode refuses edits there otherwise
+  ([anthropics/claude-code#95982](https://github.com/anthropics/claude-code/issues/95982)).
 - `rig --sandbox` runs Bash in Claude Code's sandbox with no unsandboxed
   commands.
 - A rig that names a plugin you haven't installed offers to install it.
-- `/rig:install-rig` puts `rig` on your PATH with zsh tab completion, and
-  `--claude` makes `claude` run rig. A session start tells you when an update
-  left the installed `rig` behind.
+- `/rig:install-rig` puts `rig` on your PATH with zsh tab completion and makes
+  `claude` run rig, leaving a `claude` shell function of your own alone. A
+  session start tells you when an update left the installed `rig` behind.
+- `rig doctor` checks what a new zsh sees (the `rig` on PATH, the `claude`
+  function, tab completion for both), prints the fix for each failed check,
+  then runs Claude Code's own doctor. `claude doctor` does the same.

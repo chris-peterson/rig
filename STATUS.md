@@ -6,7 +6,7 @@ Maintained by `/sextant:spec-status`.
 **Last audit:** 2026-11-10
 **Spec version:** root SPEC.md (unversioned)
 **Plugin version:** unreleased
-**Coverage:** 56 Covered, 0 Partial, 0 Missing/Contradicts
+**Coverage:** 64 Covered, 0 Partial, 0 Missing/Contradicts
 **Evidence pointers:** file
 
 ## Status by category
@@ -16,13 +16,19 @@ Maintained by `/sextant:spec-status`.
 | RIG-01..11 | 11 | All Covered | `scripts/rig` (`load_config`, `resolve`), tests in `tests/test_rig.py`. RIG-04 is a per-launch `--settings` overlay of `enabledPlugins`, which outranks user and project settings (verified 2026-11-10) |
 | SETUP-01..06 | 8 | All Covered | `scripts/rig` (`RigEdits`, `setup`, `launch`), tests in `tests/test_rig.py`; SETUP-01 and SETUP-05 drive the editor through a pty. Includes SETUP-04a..b. SETUP-04a reads the settings file as text, since the blank lines don't survive a JSON parse. `claude plugin disable` rewrites the file without them (verified 2026-11-10, Claude Code project scope), so the groups last only in a file edited by hand |
 | EDITOR-01..12 | 12 | All Covered | `scripts/rig` (`RigEdits`, `editor_app`), tests in `tests/test_rig.py` drive it headless with Textual's pilot, keys and clicks |
-| PIN-01..10 | 10 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. PIN-08 uses `--plugin-dir`: the checkout loads as `<name>@inline` and the installed copy doesn't load, including when the overlay disables it (verified 2026-11-10) |
+| PIN-01..11 | 11 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. PIN-08 uses `--plugin-dir`: the checkout loads as `<name>@inline` and the installed copy doesn't load, including when the overlay disables it (verified 2026-11-10). PIN-11 (`auto_mode_server_off`) works around anthropics/claude-code#95982 |
 | SANDBOX-01 | 1 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. The overlay carries ai-sdlc's strict sandbox block; a launch on a machine without the sandbox hasn't been tried |
 | LAUNCH-01..04 | 4 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. A launch whose arguments carry `--settings` is refused, since a second `--settings` replaces the first (verified 2026-11-10) |
-| SHELL-01..04 | 4 | All Covered | `scripts/rig`, `commands/install-rig.md`, `hooks/cli-freshness.sh`; tests run the install against a throwaway HOME |
+| SHELL-01..06 | 6 | All Covered | `scripts/rig` (`main`, `cmd_install_cli`), `commands/install-rig.md`, `hooks/cli-freshness.sh`; tests run the install against a throwaway HOME |
 | TAB-01..06 | 6 | All Covered | `scripts/rig` (`ZSH_COMPLETION`); tests check parity, zsh syntax, and the awk readers. Not yet exercised in a live shell |
+| DOCTOR-01..05 | 5 | All Covered | `scripts/rig` (`cmd_doctor`, `shell_probe`), tests in `tests/test_rig.py` probe a new zsh in a throwaway HOME. On a live machine (2026-11-10) it caught a `~/.zcompdump` from before `_rig`, read by `compinit -C` |
 
 ## Audit history
+
+### 2026-11-10: Coverage refresh (spec-status)
+
+STATUS.md updated: +8 IDs (SHELL-05..06, DOCTOR-01..05, PIN-11), all
+Covered; SHELL-04 and RIG-06 reworded. Coverage 64 of 64.
 
 ### 2026-11-10: Rig editor (spec-status)
 

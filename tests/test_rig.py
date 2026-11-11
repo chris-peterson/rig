@@ -45,6 +45,8 @@ FAKE_CLAUDE = textwrap.dedent('''\
         sys.exit(0)
     with open(os.environ["RIG_TEST_ARGV"], "a") as f:
         f.write(json.dumps(sys.argv[1:]) + "\\n")
+    with open(os.environ["RIG_TEST_ARGV"] + ".auto-mode", "a") as f:
+        f.write(json.dumps(os.environ.get("CLAUDE_CODE_AUTO_MODE_SERVER")) + "\\n")
     ''')
 
 
@@ -118,6 +120,12 @@ class RigCase(unittest.TestCase):
             return []
         return [json.loads(line) for line in self.argv_log.read_text().splitlines()]
 
+    def auto_mode_server(self) -> str | None:
+        """CLAUDE_CODE_AUTO_MODE_SERVER as the one claude launch saw it."""
+        values = Path(f"{self.argv_log}.auto-mode").read_text().splitlines()
+        self.assertEqual(len(values), 1, values)
+        return json.loads(values[0])
+
     def write_rigs(self, text: str) -> None:
         path = self.home / ".rig" / "rigs.yml"
         path.parent.mkdir(exist_ok=True)
@@ -135,6 +143,12 @@ class RigCase(unittest.TestCase):
         path = folder / ".claude" / "settings.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"enabledPlugins": enabled}, indent=2))
+
+    def write_wrapper(self, target: Path):
+        wrapper = self.home / ".local" / "bin" / "rig"
+        wrapper.parent.mkdir(parents=True, exist_ok=True)
+        wrapper.write_text(f'#!/bin/sh\nexec uv run --quiet --script "{target}" "$@"\n')
+        wrapper.chmod(0o755)
 
     def launched(self) -> tuple[dict, list[str]]:
         """The settings overlay and the remaining arguments of the one claude launch."""
@@ -244,10 +258,18 @@ class Rigs(RigCase):
         self.assertIn("no rig named nope. Rigs: base, web", result.stderr)
         self.assertEqual(self.claude_calls(), [])
 
-    def test_rig_06_bare_rig_uses_default(self):
-        result = self.rig()
+    def test_rig_06_launch_naming_no_rig_uses_default(self):
+        result = self.rig("claude")
         self.assertIn("rig: base, 2 plugins", result.stderr)
         self.assertEqual(self.launched()[1], [])
+
+    def test_shell_06_rig_claude_runs_rig_commands(self):
+        self.assertTrue(self.rig("claude", "list").stdout.startswith("base (default)"))
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_shell_06_rig_claude_launches_with_arguments(self):
+        self.rig("claude", "-p", "hi")
+        self.assertEqual(self.launched()[1], ["-p", "hi"])
 
     def test_rig_07_list(self):
         result = self.rig("list")
@@ -268,14 +290,14 @@ class Rigs(RigCase):
 
     def test_rig_08_missing_plugin_installed_after_yes(self):
         self.write_installed("a@m")
-        status, _ = self.rig_tty(answers="y\n")
+        status, _ = self.rig_tty("claude", answers="y\n")
         self.assertEqual(status, 0)
         self.assertEqual(self.claude_calls()[0], ["plugin", "install", "b@m"])
         self.assertEqual(self.claude_calls()[1][0], "--settings")
 
     def test_rig_08_missing_plugin_refused_after_no(self):
         self.write_installed("a@m")
-        status, output = self.rig_tty(answers="n\n")
+        status, output = self.rig_tty("claude", answers="n\n")
         self.assertNotEqual(status, 0)
         self.assertIn("launch refused: b@m isn't installed", output)
         self.assertEqual(self.claude_calls(), [])
@@ -379,14 +401,15 @@ class Shell(RigCase):
         self.assertLess(lines.index("fpath=(~/.zsh/completions $fpath)"),
                         lines.index("autoload -Uz compinit && compinit"))
 
-    def test_shell_04_install_offers_claude_function(self):
-        result = self.rig("install-cli")
-        self.assertIn("--claude", result.stdout)
-        self.assertFalse((self.home / ".zsh" / "rig.zsh").exists())
+    def test_shell_01_bashcompinit_is_not_compinit(self):
+        (self.home / ".zshrc").write_text("autoload -U bashcompinit && bashcompinit\n")
+        self.rig("install-cli")
+        lines = (self.home / ".zshrc").read_text().splitlines()
+        self.assertEqual(lines[1:3], ["fpath=(~/.zsh/completions $fpath)", "autoload -Uz compinit && compinit"])
 
-    def test_shell_04_claude_flag_makes_claude_run_rig(self):
-        self.rig("install-cli", "--claude")
-        self.assertIn('claude() { rig "$@" }', (self.home / ".zsh" / "rig.zsh").read_text())
+    def test_shell_04_install_makes_claude_run_rig(self):
+        self.rig("install-cli")
+        self.assertIn('claude() { rig claude "$@" }', (self.home / ".zsh" / "rig.zsh").read_text())
         self.assertIn("source ~/.zsh/rig.zsh", (self.home / ".zshrc").read_text())
         found = subprocess.run(["zsh", "-ic", "whence -w claude"], capture_output=True, text=True,
                                env=self.env, stdin=subprocess.DEVNULL)
@@ -396,14 +419,28 @@ class Shell(RigCase):
         other = self.home / "other.zsh"
         other.write_text("claude() { echo other }\n")
         (self.home / ".zshrc").write_text(f"source {other}\n")
-        result = self.rig("install-cli", "--claude")
+        result = self.rig("install-cli")
         self.assertIn(f"claude is a shell function from {other}", result.stdout)
         self.assertFalse((self.home / ".zsh" / "rig.zsh").exists())
 
-    def write_wrapper(self, target: Path):
-        wrapper = self.home / ".local" / "bin" / "rig"
-        wrapper.parent.mkdir(parents=True)
-        wrapper.write_text(f'#!/bin/sh\nexec uv run --quiet --script "{target}" "$@"\n')
+    def test_install_cli_takes_no_arguments(self):
+        result = self.rig("install-cli", "--claude")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("install-cli takes no arguments", result.stderr)
+
+    def test_shell_05_bare_rig_prints_usage(self):
+        result = self.rig()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith("usage: rig"))
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_shell_06_rig_claude_rig_is_bare_rig(self):
+        self.assertTrue(self.rig("claude", "rig").stdout.startswith("usage: rig"))
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_shell_06_rig_claude_passes_subcommands_through(self):
+        self.rig("claude", "plugin", "list")
+        self.assertEqual(self.claude_calls(), [["plugin", "list"]])
 
     def test_shell_02_silent_without_wrapper(self):
         result = self.rig("freshness")
@@ -433,6 +470,111 @@ class Shell(RigCase):
         checkout.write_text("")
         self.write_wrapper(checkout)
         self.assertEqual(self.rig("freshness").stdout, "")
+
+
+class Doctor(RigCase):
+    """`rig doctor` against a new zsh in the throwaway HOME, with its ~/.local/bin first on PATH
+    and no other rig on PATH."""
+
+    def setUp(self):
+        super().setUp()
+        rest = [p for p in self.env["PATH"].split(os.pathsep) if not (Path(p) / "rig").exists()]
+        self.env["PATH"] = os.pathsep.join([str(self.home / ".local" / "bin"), *rest])
+
+    def plugin_build(self, version: str) -> Path:
+        script = self.home / ".claude" / "plugins" / "cache" / "m" / "rig" / version / "scripts" / "rig"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("")
+        return script
+
+    def install_rig_plugin(self, version: str) -> None:
+        path = self.home / ".claude" / "plugins" / "installed_plugins.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        entry = {"scope": "user", "installPath": str(self.plugin_build(version).parent.parent)}
+        path.write_text(json.dumps({"version": 2, "plugins": {"rig@m": [entry]}}))
+
+    def test_doctor_01_to_03_pass_after_install(self):
+        self.rig("install-cli")
+        result = self.rig("doctor")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, textwrap.dedent(f"""\
+            rig shell setup:
+              ✓ rig runs the checkout at {REPO}
+              ✓ claude runs rig (~/.zsh/rig.zsh)
+              ✓ zsh completes rig
+              ✓ zsh completes claude as rig
+
+            """))
+
+    def test_doctor_01_wrapper_into_older_install(self):
+        self.install_rig_plugin("0.0.2")
+        self.write_wrapper(self.plugin_build("0.0.1"))
+        result = self.rig("doctor")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("✗ rig runs ~/.claude/plugins/cache/m/rig/0.0.1/scripts/rig, not the installed "
+                      "~/.claude/plugins/cache/m/rig/0.0.2/scripts/rig\n"
+                      "      fix: run /rig:install-rig in Claude Code\n", result.stdout)
+
+    def test_doctor_01_wrapper_into_gone_install(self):
+        self.write_wrapper(self.home / ".claude" / "plugins" / "cache" / "m" / "rig" / "0.0.1" / "scripts" / "rig")
+        self.assertIn("✗ rig runs ~/.claude/plugins/cache/m/rig/0.0.1/scripts/rig, which is gone",
+                      self.rig("doctor").stdout)
+
+    def test_doctor_01_installed_plugin_passes(self):
+        self.install_rig_plugin("0.0.2")
+        self.write_wrapper(self.plugin_build("0.0.2"))
+        self.assertIn("✓ rig runs the installed plugin at ~/.claude/plugins/cache/m/rig/0.0.2",
+                      self.rig("doctor").stdout)
+
+    def test_doctor_01_no_rig_on_path(self):
+        result = self.rig("doctor")
+        self.assertIn("✗ a new zsh finds no rig on PATH\n      fix: run /rig:install-rig in Claude Code",
+                      result.stdout)
+
+    def test_doctor_02_another_claude_function(self):
+        other = self.home / "other.zsh"
+        other.write_text("claude() { echo other }\n")
+        (self.home / ".zshrc").write_text(f"source {other}\n")
+        self.rig("install-cli")
+        result = self.rig("doctor")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("✗ claude is a shell function from ~/other.zsh\n"
+                      "      fix: remove that claude function, then run /rig:install-rig in Claude Code\n",
+                      result.stdout)
+
+    def test_doctor_03_outdated_completion(self):
+        self.rig("install-cli")
+        (self.home / ".zsh" / "completions" / "_rig").write_text("#compdef rig\n")
+        self.assertIn("✗ ~/.zsh/completions/_rig is out of date", self.rig("doctor").stdout)
+
+    def test_doctor_03_fpath_after_compinit(self):
+        self.rig("install-cli")
+        zshrc = self.home / ".zshrc"
+        lines = zshrc.read_text().splitlines()
+        lines.remove("fpath=(~/.zsh/completions $fpath)")
+        zshrc.write_text("\n".join(lines + ["fpath=(~/.zsh/completions $fpath)"]) + "\n")
+        self.assertIn("✗ compinit didn't register rig's completion\n"
+                      "      fix: put `fpath=(~/.zsh/completions $fpath)` before compinit in ~/.zshrc\n",
+                      self.rig("doctor").stdout)
+
+    def test_doctor_03_compinit_reads_a_dump_from_before_rig(self):
+        (self.home / ".zshrc").write_text("fpath=(~/.zsh/completions $fpath)\nautoload -Uz compinit && compinit -C\n")
+        subprocess.run(["zsh", "-ic", "true"], env=self.env, stdin=subprocess.DEVNULL, capture_output=True)
+        self.rig("install-cli")
+        self.assertIn("✗ compinit didn't register rig's completion\n"
+                      "      fix: rm ~/.zcompdump*, then open a new shell; compinit read a dump from before "
+                      "rig's completion\n", self.rig("doctor").stdout)
+        for dump in self.home.glob(".zcompdump*"):
+            dump.unlink()
+        self.assertIn("✓ zsh completes rig", self.rig("doctor").stdout)
+
+    def test_doctor_03_claude_not_completed_as_rig(self):
+        self.assertIn("✗ zsh doesn't complete claude as rig", self.rig("doctor").stdout)
+
+    def test_doctor_05_runs_claude_doctor_after_its_checks(self):
+        result = self.rig("doctor")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.claude_calls(), [["doctor"]])
 
 
 class Pins(RigCase):
@@ -518,7 +660,7 @@ class Pins(RigCase):
 
     def test_pin_07_asks_inside_pinned_checkout(self):
         self.rig("pin", str(self.ckout))
-        status, output = self.rig_tty(answers="n\n", cwd=self.ckout)
+        status, output = self.rig_tty("claude", answers="n\n", cwd=self.ckout)
         self.assertEqual(status, 0, output)
         self.assertIn("~/src/b is pinned. Load it into this session?", output)
         overlay, args = self.launched()
@@ -533,9 +675,40 @@ class Pins(RigCase):
         self.assertIs(overlay["enabledPlugins"]["b@m"], False)
         self.assertIn("pins: b  ~/src/b  (pinned just now)", result.stderr)
 
+    def test_pin_11_pin_holding_cwd_turns_auto_mode_server_off(self):
+        self.rig("pin", str(self.ckout))
+        result = self.rig("-p", "hi", cwd=self.ckout)
+        self.assertEqual(self.auto_mode_server(), "0")
+        self.assertIn("auto mode: CLAUDE_CODE_AUTO_MODE_SERVER=0, since b is pinned here", result.stderr)
+
+    def test_pin_11_folder_holding_pin_turns_auto_mode_server_off(self):
+        self.rig("pin", str(self.ckout))
+        self.rig("-p", "hi", cwd=self.home / "src")
+        self.assertEqual(self.auto_mode_server(), "0")
+
+    def test_pin_11_unrelated_folder_leaves_auto_mode_server(self):
+        self.rig("pin", str(self.ckout))
+        elsewhere = self.home / "elsewhere"
+        elsewhere.mkdir()
+        result = self.rig("-p", "hi", cwd=elsewhere)
+        self.assertIsNone(self.auto_mode_server())
+        self.assertNotIn("auto mode:", result.stderr)
+
+    def test_pin_11_pin_not_loaded_leaves_auto_mode_server(self):
+        x = self.checkout("x")
+        self.rig("pin", str(x))
+        self.rig("-p", "hi", cwd=x)
+        self.assertIsNone(self.auto_mode_server())
+
+    def test_pin_11_environment_value_kept(self):
+        self.rig("pin", str(self.ckout))
+        result = self.rig("-p", "hi", cwd=self.ckout, env={"CLAUDE_CODE_AUTO_MODE_SERVER": "1"})
+        self.assertEqual(self.auto_mode_server(), "1")
+        self.assertNotIn("auto mode:", result.stderr)
+
     def test_pin_09_asks_about_pin_outside_rig(self):
         self.rig("pin", str(self.checkout("x")))
-        status, output = self.rig_tty(answers="y\n")
+        status, output = self.rig_tty("claude", answers="y\n")
         self.assertEqual(status, 0, output)
         self.assertIn("x is pinned at ~/src/x, and rig base doesn't include it. Load it?", output)
         self.assertIn("--plugin-dir", self.launched()[1])
@@ -637,7 +810,7 @@ class Setup(RigCase):
 
     def test_setup_01_interactive_launch_runs_setup_then_launches(self):
         self.settings(FLAT_SETTINGS)
-        status, output = self.rig_tty(keys=["space", "s", "q"])
+        status, output = self.rig_tty("claude", keys=["space", "s", "q"])
         self.assertEqual(status, 0, output)
         self.assertEqual(self.config()["default"], "base")
         enabled = self.launched()[0]["enabledPlugins"]
@@ -645,7 +818,7 @@ class Setup(RigCase):
 
     def test_setup_01_launch_stops_when_setup_saves_nothing(self):
         self.settings(FLAT_SETTINGS)
-        status, output = self.rig_tty(keys=["q", "d"])
+        status, output = self.rig_tty("claude", keys=["q", "d"])
         self.assertNotEqual(status, 0)
         self.assertIn("setup closed without saving any rigs", output)
         self.assertEqual(self.claude_calls(), [])

@@ -53,8 +53,8 @@ When the user runs `rig use <name>`, the system shall launch Claude Code with
 the named rig.
 
 #### `RIG-06`
-When the user runs `rig` with no rig named, the system shall launch Claude Code
-with the default rig.
+When a launch names no rig, the system shall launch Claude Code with the
+default rig.
 
 #### `RIG-07`
 When the user runs `rig list`, the system shall list each rig with its plugins
@@ -211,6 +211,12 @@ shall ask whether to load that pin.
 If a launch's rig does not include a pinned plugin and no one is at a terminal
 to ask, then the system shall launch without that pin.
 
+#### `PIN-11`
+Where a launch loads a pin whose checkout holds the working directory or sits
+inside it, the system shall start Claude Code with
+`CLAUDE_CODE_AUTO_MODE_SERVER=0`, unless the environment already sets it, and
+say so before Claude Code starts.
+
 ### `SANDBOX`
 Sandbox
 
@@ -255,8 +261,16 @@ The system shall accept `rig rig <command>` as `rig <command>`, and `rig plugin
 pin|unpin` as `rig pin|unpin`, so `rig` can stand in for `claude`.
 
 #### `SHELL-04`
-Where no other shell function defines `claude`, the install shall offer to make
-`claude` run rig.
+Where no other shell function defines `claude`, the install shall make `claude`
+run `rig claude`.
+
+#### `SHELL-05`
+When the user runs `rig` with no arguments, the system shall print its usage
+without launching Claude Code.
+
+#### `SHELL-06`
+When the user runs `rig claude`, the system shall treat the arguments that
+follow as arguments to `rig`, launching the default rig when none follow.
 
 ### `TAB`
 Tab completion
@@ -284,3 +298,26 @@ pinned plugins.
 
 #### `TAB-06`
 When the user completes a flag of a launch, the system shall offer `--sandbox`.
+
+### `DOCTOR`
+Doctor
+
+#### `DOCTOR-01`
+When the user runs `rig doctor`, the system shall check that the `rig` command
+a new zsh finds on PATH runs the installed version.
+
+#### `DOCTOR-02`
+When the user runs `rig doctor`, the system shall check that `claude` runs rig
+in a new zsh, naming the file that defines `claude` when it doesn't.
+
+#### `DOCTOR-03`
+When the user runs `rig doctor`, the system shall check that a new zsh
+completes `rig` and `claude` with the installed version's completion.
+
+#### `DOCTOR-04`
+If a doctor check fails, then the system shall print the command that fixes it
+and exit non-zero.
+
+#### `DOCTOR-05`
+When the user runs `rig doctor`, the system shall run Claude Code's `doctor`
+after its own checks.

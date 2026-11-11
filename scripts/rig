@@ -229,6 +229,22 @@ def install_missing(name: str, plugins: list[str], cwd: Path, args: list[str]) -
             fail(f"`claude plugin install {plugin}` failed; launch refused.")
 
 
+AUTO_MODE_SERVER = "CLAUDE_CODE_AUTO_MODE_SERVER"
+
+
+def auto_mode_server_off(loaded: list[dict], cwd: Path) -> list[str]:
+    """PIN-11: the launch-summary line when this launch turns the auto mode server off, else nothing."""
+    cwd = cwd.resolve()
+    here = [pin["plugin"] for pin in loaded
+            if cwd.is_relative_to(Path(pin["path"]).resolve()) or Path(pin["path"]).resolve().is_relative_to(cwd)]
+    if not here or AUTO_MODE_SERVER in os.environ:
+        return []
+    # Auto mode refuses edits inside a --plugin-dir checkout under the session's folder:
+    # https://github.com/anthropics/claude-code/issues/95982
+    os.environ[AUTO_MODE_SERVER] = "0"
+    return [f"auto mode: {AUTO_MODE_SERVER}=0, since {', '.join(here)} {'is' if len(here) == 1 else 'are'} pinned here"]
+
+
 def settings_flag(args: list[str]) -> bool:
     return any(a == "--settings" or a.startswith("--settings=") for a in args)
 
@@ -263,8 +279,8 @@ def launch(name: str | None, args: list[str]) -> None:
     enabled = [p for p in plugins if p.split("@")[0] not in replaced]
     lineage = f" (extends {rigs[name]['extends']})" if rigs[name]["extends"] else ""
     count = f"{len(plugins)} plugin{'' if len(plugins) == 1 else 's'}"
-    print(f"rig: {name}{lineage}, {count}", *describe_pins(chosen), f"sandbox: {'on' if sandbox_flag else 'off'}",
-          sep="\n", file=sys.stderr)
+    print(f"rig: {name}{lineage}, {count}", *describe_pins(chosen), *auto_mode_server_off(loaded, cwd),
+          f"sandbox: {'on' if sandbox_flag else 'off'}", sep="\n", file=sys.stderr)
     plugin_dirs = [arg for pin in loaded for arg in ("--plugin-dir", pin["path"])]
     settings = overlay(enabled, known_plugin_ids(cwd), sandbox_flag)
     exec_claude(["--settings", json.dumps(settings), *plugin_dirs, *args])
@@ -1098,6 +1114,14 @@ def is_active(line: str) -> bool:
     return bool(line.strip()) and not line.lstrip().startswith("#")
 
 
+def runs_compinit(line: str) -> bool:
+    return is_active(line) and re.search(r"\bcompinit\b", line) is not None
+
+
+def puts_completions_on_fpath(line: str) -> bool:
+    return is_active(line) and ".zsh/completions" in line
+
+
 def install_wrapper() -> None:
     script = (PLUGIN_ROOT / "scripts" / "rig").resolve()
     text = wrapper_text(script)
@@ -1121,10 +1145,10 @@ def install_completions() -> None:
     zshrc = Path.home() / ".zshrc"
     content = zshrc.read_text() if zshrc.exists() else ""
     lines = content.splitlines(keepends=True)
-    if any(is_active(line) and ".zsh/completions" in line for line in lines):
+    if any(puts_completions_on_fpath(line) for line in lines):
         print(f"  ✓ {zshrc} already puts ~/.zsh/completions on fpath")
         return
-    at = next((i for i, line in enumerate(lines) if is_active(line) and "compinit" in line), None)
+    at = next((i for i, line in enumerate(lines) if runs_compinit(line)), None)
     if at is None:
         if content and not content.endswith("\n"):
             lines.append("\n")
@@ -1147,8 +1171,8 @@ def claude_function_origin() -> str | None:
     return match.group(1) or "an unknown file"
 
 
-SNIPPET_TEXT = f"""{SNIPPET_SENTINEL}: written by `rig install-cli --claude`.
-claude() {{ rig "$@" }}
+SNIPPET_TEXT = f"""{SNIPPET_SENTINEL}: written by `rig install-cli`.
+claude() {{ rig claude "$@" }}
 # A later compinit drops an earlier compdef, so register at the first prompt.
 autoload -Uz add-zsh-hook
 _rig_compdef_claude() {{
@@ -1159,15 +1183,11 @@ add-zsh-hook precmd _rig_compdef_claude
 """
 
 
-def install_claude_function(enable: bool) -> None:
-    """SHELL-04: offer `claude` → rig, unless another shell function already defines claude."""
+def install_claude_function() -> None:
+    """SHELL-04: make `claude` run rig, unless another shell function already defines claude."""
     origin = claude_function_origin()
-    ours = origin is not None and Path(origin).expanduser() == SNIPPET
-    if origin and not ours:
+    if origin and Path(origin).expanduser() != SNIPPET:
         print(f"  · claude is a shell function from {origin}; left as is")
-        return
-    if not enable and not ours:
-        print(f"  · to make claude run rig: {INSTALL_COMMAND} --claude")
         return
     SNIPPET.parent.mkdir(parents=True, exist_ok=True)
     SNIPPET.write_text(SNIPPET_TEXT)
@@ -1185,15 +1205,14 @@ def install_claude_function(enable: bool) -> None:
 
 def cmd_install_cli(args: list[str]) -> int:
     """SHELL-01, SHELL-04."""
-    unknown = [a for a in args if a != "--claude"]
-    if unknown:
-        fail(f"install-cli takes only --claude, not {' '.join(unknown)}")
+    if args:
+        fail(f"install-cli takes no arguments, not {' '.join(args)}")
     import shutil
     if not shutil.which("uv"):
         fail("uv is not on PATH; rig runs through it. Install it: https://docs.astral.sh/uv/")
     install_wrapper()
     install_completions()
-    install_claude_function("--claude" in args)
+    install_claude_function()
     print("Open a new shell (or run: exec zsh) to pick up the changes.")
     return 0
 
@@ -1279,7 +1298,8 @@ _rig() {
     'setup:Edit the rigs in a full-screen editor'
     'pin:Use a local plugin checkout in place of the installed copy; bare pin lists the pins'
     'unpin:Stop using a pinned checkout'
-    'install-cli:Put rig on PATH with completions; --claude makes claude run rig'
+    'install-cli:Put rig on PATH with completions, and make claude run rig'
+    'doctor:Check the rig command, the claude function, and tab completion, then run claude doctor'
   )
   local ret=1
   if [[ $words[2] == rig ]]; then
@@ -1327,7 +1347,6 @@ _rig() {
       return ret
       ;;
     unpin) _rig_pinned ;;
-    install-cli) compadd -- --claude ;;
     *) _default ;;
   esac
 }
@@ -1343,8 +1362,152 @@ def cmd_completions(args: list[str]) -> int:
     return 0
 
 
-USAGE = f"""usage: rig [<claude args>...]           launch Claude Code with the default rig
-       rig <command> [<args>...]
+DOCTOR_PROBE = r"""
+typeset -a found=(${^fpath}/_rig(N))
+print -r -- "rig-doctor rig=$(whence -p rig)"
+print -r -- "rig-doctor claude=$(whence -v claude)"
+print -r -- "rig-doctor completer=$found[1]"
+print -r -- "rig-doctor compinit=$+functions[compdef]"
+print -r -- "rig-doctor comp-rig=$_comps[rig]"
+print -r -- "rig-doctor comp-claude=$_comps[claude]"
+print -r -- "rig-doctor compdef-pending=$precmd_functions[(I)_rig_compdef_claude]"
+"""
+
+
+def shell_probe() -> dict[str, str] | None:
+    """What a new interactive zsh sees, as DOCTOR_PROBE reports it; None when zsh isn't on PATH."""
+    import shutil
+    if not shutil.which("zsh"):
+        return None
+    try:
+        result = subprocess.run(["zsh", "-ic", DOCTOR_PROBE], capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL, timeout=30)
+    except subprocess.TimeoutExpired:
+        fail("a new interactive zsh didn't finish starting within 30 seconds; check ~/.zshrc.")
+    return dict(line.removeprefix("rig-doctor ").split("=", 1)
+                for line in result.stdout.splitlines() if line.startswith("rig-doctor "))
+
+
+def installed_rig_script() -> Path | None:
+    """scripts/rig in the rig plugin build installed at user scope, or None."""
+    for plugin_id, entries in installed_plugins().items():
+        if plugin_id.partition("@")[0] != "rig":
+            continue
+        for entry in entries:
+            if entry.get("scope") == "user" and entry.get("installPath"):
+                return Path(entry["installPath"]) / "scripts" / "rig"
+    return None
+
+
+Check = tuple[bool, str, str]
+FIX_INSTALL = f"run {INSTALL_COMMAND} in Claude Code"
+
+
+def same_file(a: Path | str, b: Path) -> bool:
+    return Path(a).expanduser().resolve() == b.expanduser().resolve()
+
+
+def check_rig_on_path(probe: dict[str, str]) -> Check:
+    """DOCTOR-01."""
+    found = probe.get("rig", "")
+    if not found:
+        fix = f"add {display(WRAPPER.parent)} to PATH in ~/.zshrc" if WRAPPER.is_file() else FIX_INSTALL
+        return False, "a new zsh finds no rig on PATH", fix
+    if not same_file(found, WRAPPER):
+        return (False, f"rig on PATH is {display(found)}, not {display(WRAPPER)}",
+                f"remove {display(found)}, or put {display(WRAPPER.parent)} ahead of it on PATH")
+    target = wrapper_target()
+    if target is None:
+        return False, f"{display(WRAPPER)} doesn't run a rig script", FIX_INSTALL
+    if not target.is_file():
+        return False, f"rig runs {display(target)}, which is gone", FIX_INSTALL
+    if not in_plugin_cache(target):
+        return True, f"rig runs the checkout at {display(target.parent.parent)}", ""
+    installed = installed_rig_script()
+    if installed is None:
+        return (False, f"rig runs {display(target)}, but the rig plugin isn't installed",
+                f"install rig with /plugin, then {FIX_INSTALL}")
+    if not same_file(target, installed):
+        return False, f"rig runs {display(target)}, not the installed {display(installed)}", FIX_INSTALL
+    return True, f"rig runs the installed plugin at {display(installed.parent.parent)}", ""
+
+
+def check_claude_runs_rig(probe: dict[str, str]) -> Check:
+    """DOCTOR-02."""
+    found = probe.get("claude", "")
+    match = re.match(r"^claude is a shell function(?: from (.+))?$", found)
+    if not match:
+        return False, f"in a new zsh, {found or 'claude is not found'}", FIX_INSTALL
+    origin = match.group(1)
+    if origin is None or not same_file(origin, SNIPPET):
+        where = display(origin) if origin else "an unknown file"
+        return (False, f"claude is a shell function from {where}",
+                f"remove that claude function, then {FIX_INSTALL}")
+    if SNIPPET.read_text() != SNIPPET_TEXT:
+        return False, f"{display(SNIPPET)} is out of date", FIX_INSTALL
+    return True, f"claude runs rig ({display(SNIPPET)})", ""
+
+
+def check_rig_completion(probe: dict[str, str]) -> Check:
+    """DOCTOR-03, for rig."""
+    target = COMPLETION_DIR / "_rig"
+    if not target.is_file() or target.read_text() != ZSH_COMPLETION:
+        state = "out of date" if target.is_file() else "missing"
+        return False, f"{display(target)} is {state}", FIX_INSTALL
+    found = probe.get("completer", "")
+    if not found:
+        return False, f"a new zsh doesn't have {display(COMPLETION_DIR)} on fpath", FIX_INSTALL
+    if not same_file(found, target):
+        return False, f"a new zsh loads _rig from {display(found)} first", f"remove {display(found)}"
+    if probe.get("compinit") != "1":
+        return False, "~/.zshrc doesn't run compinit", FIX_INSTALL
+    if probe.get("comp-rig") != "_rig":
+        return False, "compinit didn't register rig's completion", unregistered_completion_fix()
+    return True, "zsh completes rig", ""
+
+
+def unregistered_completion_fix() -> str:
+    """Where ~/.zshrc puts the completions on fpath ahead of compinit, compinit read a dump written
+    before _rig existed (as `compinit -C` does, skipping the check for new files)."""
+    zshrc = Path.home() / ".zshrc"
+    lines = zshrc.read_text().splitlines() if zshrc.is_file() else []
+    fpath_at = next((i for i, line in enumerate(lines) if puts_completions_on_fpath(line)), None)
+    compinit_at = next((i for i, line in enumerate(lines) if runs_compinit(line)), None)
+    if fpath_at is not None and (compinit_at is None or fpath_at < compinit_at):
+        return "rm ~/.zcompdump*, then open a new shell; compinit read a dump from before rig's completion"
+    return f"put `{FPATH_LINE}` before compinit in ~/.zshrc"
+
+
+def check_claude_completion(probe: dict[str, str]) -> Check:
+    """DOCTOR-03, for claude."""
+    if probe.get("comp-claude") == "_rig" or int(probe.get("compdef-pending") or 0) > 0:
+        return True, "zsh completes claude as rig", ""
+    return False, "zsh doesn't complete claude as rig", FIX_INSTALL
+
+
+def cmd_doctor(args: list[str]) -> int:
+    """DOCTOR-01..05: check what a new zsh sees, then run Claude Code's doctor."""
+    probe = shell_probe()
+    if probe is None:
+        checks = [(False, "zsh isn't on PATH, and rig's shell setup is for zsh", "install zsh")]
+    else:
+        checks = [check(probe) for check in
+                  (check_rig_on_path, check_claude_runs_rig, check_rig_completion, check_claude_completion)]
+    print("rig shell setup:")
+    for ok, what, fix in checks:
+        print(f"  {'✓' if ok else '✗'} {what}")
+        if not ok:
+            print(f"      fix: {fix}")
+    print(flush=True)
+    try:
+        status = subprocess.run(["claude", "doctor", *args]).returncode
+    except FileNotFoundError:
+        fail("claude is not on PATH.")
+    return 1 if not all(ok for ok, _, _ in checks) else status
+
+
+USAGE = f"""usage: rig <command> [<args>...]
+       rig <claude args>...            launch Claude Code with the default rig
 
 Commands:
   use <rig> [<claude args>]  launch Claude Code with the named rig
@@ -1354,11 +1517,14 @@ Commands:
   pin [<path|name>...]       use a local plugin checkout in place of the installed copy;
                              with no arguments, list the pins
   unpin <path|name>...       stop using a pinned checkout
-  install-cli [--claude]     put rig on PATH with tab completion; --claude makes claude run rig
+  install-cli                put rig on PATH with tab completion, and make claude run rig
+  doctor                     check the rig command, the claude function, and tab completion
+                             in a new zsh, then run Claude Code's doctor
 
 Anything else goes to Claude Code: its subcommands run unchanged, and other
-arguments start a session with the default rig. `rig rig <command>` is the same
-as `rig <command>`, so claude can run rig.
+arguments start a session with the default rig. The install makes `claude` run
+`rig claude`, which does the same, and launches the default rig when given no
+arguments. `rig rig <command>` is the same as `rig <command>`.
 
   --sandbox                  with a launch: run Bash in Claude Code's sandbox, failing if
                              it's unavailable and allowing no unsandboxed commands
@@ -1373,6 +1539,7 @@ COMMANDS = {
     "pin": cmd_pin,
     "unpin": cmd_unpin,
     "install-cli": cmd_install_cli,
+    "doctor": cmd_doctor,
     "completions": cmd_completions,
     "complete": cmd_complete,
     "freshness": cmd_freshness,
@@ -1382,10 +1549,17 @@ CLAUDE_SUBCOMMANDS_TAKEN = {"plugin": ("pin", "unpin"), "plugins": ("pin", "unpi
 
 
 def main(argv: list[str]) -> int:
+    as_claude = argv[:1] == ["claude"]
+    if as_claude:
+        argv = argv[1:]
     if argv[:1] == ["rig"]:
         argv = argv[1:]
+        as_claude = False
     elif argv[:1] and argv[1:2] and argv[1] in CLAUDE_SUBCOMMANDS_TAKEN.get(argv[0], ()):
         argv = argv[1:]
+    if not argv and not as_claude:
+        print(USAGE, end="")
+        return 0
     if argv[:1] in (["-h"], ["--help"], ["help"]):
         print(USAGE, end="")
         return 0

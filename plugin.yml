@@ -37,7 +37,7 @@ suite:
       cli-freshness: SessionStart — Tells you to run /rig:install-rig when the rig command on PATH runs an outdated install.
       hooks: 'Hook wiring: SessionStart→cli-freshness.'
     commands:
-      install-rig: Put the rig command on PATH with tab completion, or refresh it after a plugin update
+      install-rig: Put the rig command on PATH with tab completion and make claude run rig, or refresh them after a plugin update
   # <<< shipyard:describe <<<
 
 docs:

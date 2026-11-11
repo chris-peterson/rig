@@ -8,21 +8,29 @@ Install the plugin, then run its bootstrap from a Claude Code prompt:
 /rig:install-rig
 ```
 
-That puts `rig` on your PATH at `~/.local/bin/rig`, with zsh tab completion.
-rig runs through [uv](https://docs.astral.sh/uv/), so uv must be on your PATH
-too. When a plugin update leaves the `rig` on your PATH behind, a session start
-tells you to run `/rig:install-rig` again.
+That puts `rig` on your PATH at `~/.local/bin/rig`, with zsh tab completion,
+and makes `claude` run rig in new shells, so the habit you already have picks
+up your rigs and pins. rig runs through [uv](https://docs.astral.sh/uv/), so uv
+must be on your PATH too. When a plugin update leaves the `rig` on your PATH
+behind, a session start tells you to run `/rig:install-rig` again.
 
-To have `claude` itself run rig, so the habit you already have picks up your
-rigs and pins:
-
-```text
-/rig:install-rig --claude
-```
+`claude` with no arguments launches the default rig; `rig` with no arguments
+prints its usage.
 
 If another shell function already defines `claude` (a wrapper of your own),
-rig leaves it alone. Have that wrapper call `rig "$@"` where it called
+rig leaves it alone. Have that wrapper call `rig claude "$@"` where it called
 `claude`.
+
+To check the setup:
+
+```bash
+rig doctor
+```
+
+It checks what a new zsh sees: that `rig` on your PATH runs the installed
+plugin (or a checkout you're trying out), that `claude` runs rig, and that zsh
+completes both. A failed check prints the command that fixes it. Claude Code's
+own doctor runs after rig's checks, so `claude doctor` reports both.
 
 ## Rigs
 
@@ -60,9 +68,9 @@ marketplace does.
 | `q` | quit; with unsaved changes, asks first: save (the default, `enter` or `s`) or discard (`d`) |
 
 ```bash
-rig                      # the default rig
+claude                   # the default rig
 rig use web              # the web rig: the base plus web's own plugins
-rig "fix the bug"        # a prompt, with the default rig
+claude "fix the bug"     # a prompt, with the default rig
 rig list                 # every rig, its plugins, and what it extends
 ```
 
@@ -71,8 +79,7 @@ isn't installed, rig offers to install it and launches only once you agree.
 With nobody at a terminal to ask, the launch is refused.
 
 Everything rig doesn't recognize goes to Claude Code unchanged. Claude Code's
-own subcommands (`rig plugin list`, `rig mcp`, `rig doctor`) run as they would
-under `claude`, without a rig.
+own subcommands (`claude plugin list`, `claude mcp`) run without a rig.
 
 ## Pins
 
@@ -86,8 +93,7 @@ rig pin                        # list the pins and how long each has been pinned
 rig unpin acme-widget
 ```
 
-`claude plugin pin` and `claude plugin unpin` work the same way when `claude`
-runs rig.
+`claude plugin pin` and `claude plugin unpin` work the same way.
 
 Pinning by name looks the plugin up in your known marketplaces and expects its
 source repo cloned under a folder you name per host in `~/.rig/rigs.yml`:
@@ -102,10 +108,16 @@ include is asked about at a terminal, and left out otherwise. Starting inside a
 pinned checkout asks whether to load that pin, since a plugin loaded into its
 own checkout reviews edits to itself.
 
+When a loaded pin's checkout holds the folder you start in, or sits inside it,
+rig sets `CLAUDE_CODE_AUTO_MODE_SERVER=0` for that session, since auto mode
+refuses edits there otherwise
+([anthropics/claude-code#95982](https://github.com/anthropics/claude-code/issues/95982)).
+A value you set yourself wins.
+
 ## Sandbox
 
 ```bash
-rig --sandbox            # this launch only
+claude --sandbox         # this launch only
 ```
 
 The sandbox runs Bash commands in Claude Code's sandbox, fails the launch when
