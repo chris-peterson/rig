@@ -34,6 +34,7 @@ plugin.yml               canonical descriptor: manifest, marketplace entry, docs
 scripts/rig              the CLI, one Python file run through `uv run --script`; holds the zsh completion
 scripts/trial-off.sh     what `just trial-off` runs: reinstalls the CLI from the newest plugin build
 commands/install-rig.md  the bootstrap that puts `rig` on PATH
+skills/switch/SKILL.md   /rig:switch, which runs `rig switch` with the session id
 hooks/hooks.yml          hook source; cli-freshness.sh reports a stale `rig` on PATH
 tests/                   unittest suite; a test covering a requirement names its ID
 dev/demo.py              what `just demo` runs

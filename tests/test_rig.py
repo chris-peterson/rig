@@ -48,6 +48,11 @@ FAKE_CLAUDE = textwrap.dedent('''\
         f.write(json.dumps(sys.argv[1:]) + "\\n")
     with open(os.environ["RIG_TEST_ARGV"] + ".auto-mode", "a") as f:
         f.write(json.dumps(os.environ.get("CLAUDE_CODE_AUTO_MODE_SERVER")) + "\\n")
+    if os.environ.get("RIG_TEST_SWITCH_TO") and "--resume" not in sys.argv:
+        import subprocess
+        subprocess.run([sys.executable, os.environ["RIG_TEST_RIG"], "switch", os.environ["RIG_TEST_SWITCH_TO"],
+                        "--session", "abc"], check=True)
+    sys.exit(int(os.environ.get("RIG_TEST_EXIT", "0")))
     ''')
 
 
@@ -341,6 +346,58 @@ class Launch(RigCase):
         (self.home / ".rig" / "rigs.yml").unlink()
         result = self.rig("-p", "hi")
         self.assertIn("run `rig setup`", result.stderr)
+
+
+class Switch(RigCase):
+    def setUp(self):
+        super().setUp()
+        self.write_rigs(BASIC_RIGS)
+        self.write_installed("a@m", "b@m", "c@n")
+        self.env["RIG_TEST_RIG"] = str(RIG)
+
+    def launches(self) -> list[tuple[set[str], list[str]]]:
+        """(enabled plugins, remaining arguments) for each claude launch, in order."""
+        return [({p for p, on in json.loads(c[1])["enabledPlugins"].items() if on}, c[2:])
+                for c in self.claude_calls() if c[:1] == ["--settings"]]
+
+    def test_switch_02_exit_relaunches_the_conversation_with_the_new_rig(self):
+        self.env["RIG_TEST_SWITCH_TO"] = "web"
+        status, output = self.rig_tty("claude", "--sandbox", "fix the bug")
+        self.assertEqual(status, 0, output)
+        self.assertIn("rig relaunches this conversation with rig web", output)
+        self.assertEqual(self.launches(), [({"a@m", "b@m"}, ["fix the bug"]),
+                                           ({"a@m", "b@m", "c@n"}, ["--resume", "abc"])])
+        self.assertIn("sandbox", json.loads(self.claude_calls()[1][1]))
+        self.assertEqual(list((self.home / ".rig" / "switch").iterdir()), [])
+
+    def test_launch_06_exits_with_claudes_status(self):
+        self.env["RIG_TEST_EXIT"] = "3"
+        status, output = self.rig_tty("claude")
+        self.assertEqual(status, 3, output)
+        self.assertEqual(len(self.launches()), 1)
+
+    def test_switch_03_session_rig_did_not_launch_refused(self):
+        result = self.rig("switch", "web", "--session", "abc")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rig use web --resume abc", result.stderr)
+
+    def test_switch_04_unknown_rig_refused(self):
+        result = self.rig("switch", "nope", "--session", "abc", env={"RIG_SWITCH_FILE": str(self.home / "s.yml")})
+        self.assertIn("no rig named nope. Rigs: base, web", result.stderr)
+        self.assertFalse((self.home / "s.yml").exists())
+
+    def test_switch_05_no_rig_lists_rigs(self):
+        result = self.rig("switch", "--session", "abc", env={"RIG_CURRENT": "web"})
+        self.assertEqual(result.stdout, "base\nweb (this session)\n")
+
+    def test_switch_01_records_the_rig_and_session(self):
+        request = self.home / "s.yml"
+        result = self.rig("switch", "web", "--session", "abc",
+                          env={"RIG_SWITCH_FILE": str(request), "RIG_CURRENT": "base"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("/exit", result.stdout)
+        import yaml
+        self.assertEqual(yaml.safe_load(request.read_text()), {"rig": "web", "session": "abc"})
 
 
 class Help(RigCase):

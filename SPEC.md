@@ -26,6 +26,7 @@ below its category's heading, so every requirement has a linkable anchor
 - **sandbox**: Claude Code's sandbox for Bash commands, which a launch can turn
   on.
 - **launch**: one start of Claude Code through rig.
+- **switch**: moving a session to another rig, carrying its conversation over.
 
 ## Requirements
 
@@ -250,6 +251,37 @@ When an interactive launch has a plugin to install or a pin to choose, the
 system shall show one launch confirmation: the rig and its plugins, read-only,
 then the pins the rig leaves to choose, launching on enter and refusing the
 launch on escape.
+
+#### `LAUNCH-06`
+While an interactive launch runs, the system shall stay running until Claude
+Code exits, leaving Ctrl-C to Claude Code, and then exit with Claude Code's
+exit status.
+
+### `SWITCH`
+Switching rigs mid-session
+
+#### `SWITCH-01`
+When the user runs `/rig:switch <rig>` in a session rig launched at a
+terminal, the system shall record the switch and tell the user to exit Claude
+Code.
+
+#### `SWITCH-02`
+When Claude Code exits after a recorded switch, the system shall launch the
+named rig resuming the same conversation, with the launch's sandbox state, and
+offer pins as any launch does.
+
+#### `SWITCH-03`
+If the user runs `/rig:switch <rig>` in a session rig did not launch at a
+terminal, then the system shall refuse the switch, naming the command that
+resumes the conversation with that rig.
+
+#### `SWITCH-04`
+If `/rig:switch` names a rig that isn't defined, then the system shall refuse
+the switch, naming the rigs.
+
+#### `SWITCH-05`
+When the user runs `/rig:switch` naming no rig, the system shall list the rigs,
+marking the one the session uses.
 
 ### `SHELL`
 Shell integration

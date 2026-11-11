@@ -6,7 +6,7 @@ Maintained by `/sextant:spec-status`.
 **Last audit:** 2026-11-11
 **Spec version:** root SPEC.md (unversioned)
 **Plugin version:** unreleased
-**Coverage:** 65 Covered, 0 Partial, 0 Missing/Contradicts
+**Coverage:** 71 Covered, 0 Partial, 0 Missing/Contradicts
 **Evidence pointers:** file
 
 ## Status by category
@@ -18,12 +18,18 @@ Maintained by `/sextant:spec-status`.
 | EDITOR-01..12 | 12 | All Covered | `scripts/rig` (`RigEdits`, `editor_app`), tests in `tests/test_rig.py` drive it headless with Textual's pilot, keys and clicks |
 | PIN-01..11 | 11 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. PIN-08 uses `--plugin-dir`: the checkout loads as `<name>@inline` and the installed copy doesn't load, including when the overlay disables it (verified 2026-11-10). PIN-11 (`auto_mode_server_off`) works around anthropics/claude-code#95982 |
 | SANDBOX-01 | 1 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. The overlay carries ai-sdlc's strict sandbox block; a launch on a machine without the sandbox hasn't been tried |
-| LAUNCH-01..05 | 5 | All Covered | `scripts/rig` (`launch`, `launch_app`), tests in `tests/test_rig.py`; LAUNCH-05 drives the confirmation with Textual's pilot and through a pty. A launch whose arguments carry `--settings` is refused, since a second `--settings` replaces the first (verified 2026-11-10) |
+| LAUNCH-01..06 | 6 | All Covered | `scripts/rig` (`launch`, `claude_args`, `launch_app`, `run_claude`), tests in `tests/test_rig.py`; LAUNCH-05 drives the confirmation with Textual's pilot and through a pty. LAUNCH-06's Ctrl-C handling is untested. A launch whose arguments carry `--settings` is refused, since a second `--settings` replaces the first (verified 2026-11-10) |
+| SWITCH-01..05 | 5 | All Covered | `scripts/rig` (`cmd_switch`, `launch`, `take_switch`), `skills/switch/SKILL.md`; tests in `tests/test_rig.py` have a stand-in claude run `rig switch` and check the relaunch. Resuming a real session under a new rig hasn't been tried |
 | SHELL-01..06 | 6 | All Covered | `scripts/rig` (`main`, `cmd_install_cli`), `commands/install-rig.md`, `hooks/cli-freshness.sh`; tests run the install against a throwaway HOME |
 | TAB-01..06 | 6 | All Covered | `scripts/rig` (`ZSH_COMPLETION`); tests check parity, zsh syntax, and the awk readers. Not yet exercised in a live shell |
 | DOCTOR-01..05 | 5 | All Covered | `scripts/rig` (`cmd_doctor`, `shell_probe`), tests in `tests/test_rig.py` probe a new zsh in a throwaway HOME. On a live machine (2026-11-10) it caught a `~/.zcompdump` from before `_rig`, read by `compinit -C` |
 
 ## Audit history
+
+### 2026-11-11: Switching rigs mid-session (spec-status)
+
+STATUS.md updated: +6 IDs (SWITCH-01..05, LAUNCH-06), all Covered. Coverage
+71 of 71.
 
 ### 2026-11-11: Coverage refresh (spec-status)
 

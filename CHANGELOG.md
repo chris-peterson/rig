@@ -27,6 +27,8 @@
   and its plugins, marking what installs at launch, then the pins the rig
   leaves to choose, each preselected as the launch would load it. `enter`
   launches, `escape` cancels.
+- `/rig:switch <rig>` moves a session to another rig: type `/exit` after it,
+  and rig relaunches the same conversation with the new rig's plugins.
 - `/rig:install-rig` puts `rig` on your PATH with zsh tab completion and makes
   `claude` run rig, leaving a `claude` shell function of your own alone. A
   session start tells you when an update left the installed `rig` behind.

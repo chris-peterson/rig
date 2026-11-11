@@ -233,7 +233,8 @@ def settings_flag(args: list[str]) -> bool:
 
 
 def launch(name: str | None, args: list[str]) -> None:
-    """RIG-04..06, RIG-08, RIG-09, PIN-10, LAUNCH-01..03, LAUNCH-05, SANDBOX-01."""
+    """RIG-06, LAUNCH-06, SANDBOX-01, SETUP-01, SETUP-06: launch a rig; at a terminal, stay Claude Code's
+    parent so a switch can relaunch the conversation under another rig."""
     sandbox_flag, args = take_sandbox_flag(args)
     if settings_flag(args):
         fail("rig starts Claude Code with its own --settings, and a second --settings replaces the first. "
@@ -246,12 +247,31 @@ def launch(name: str | None, args: list[str]) -> None:
         config = load_config()
         if config is None or not config["rigs"]:
             fail("setup closed without saving any rigs; launch stopped. Run `rig setup` to try again.")
-    rigs = config["rigs"]
     if name is None:
         name = config.get("default")
         if name is None:
             fail(f"{rigs_file()} names no default rig; run `rig setup`, or launch one with `rig use <name>`.")
-    elif name not in rigs:
+    if not interactive(args):
+        exec_claude(claude_args(name, args, sandbox_flag))
+    request = switch_file()
+    try:
+        while True:
+            status = run_claude(claude_args(name, args, sandbox_flag),
+                                {SWITCH_ENV: str(request), CURRENT_RIG_ENV: name})
+            switch = take_switch(request)
+            if switch is None:
+                raise SystemExit(status)
+            name, args = switch["rig"], ["--resume", switch["session"]]
+            print(f"{PROG}: switching to rig {name}, resuming this conversation", file=sys.stderr)
+    finally:
+        request.unlink(missing_ok=True)
+
+
+def claude_args(name: str, args: list[str], sandbox_flag: bool) -> list[str]:
+    """RIG-04, RIG-05, RIG-08, RIG-09, PIN-10, LAUNCH-01..02, LAUNCH-05: the arguments that start Claude Code
+    with the rig, once its plugins are installed and its pins chosen."""
+    rigs = load_config()["rigs"]
+    if name not in rigs:
         fail(f"no rig named {name}. Rigs: {', '.join(rigs)}")
     cwd = Path.cwd()
     plugins = resolve(name, rigs)
@@ -280,7 +300,77 @@ def launch(name: str | None, args: list[str]) -> None:
           f"sandbox: {'on' if sandbox_flag else 'off'}", sep="\n", file=sys.stderr)
     plugin_dirs = [arg for pin in loaded for arg in ("--plugin-dir", pin["path"])]
     settings = overlay(enabled, known_plugin_ids(cwd), sandbox_flag)
-    exec_claude(["--settings", json.dumps(settings), *plugin_dirs, *args])
+    return ["--settings", json.dumps(settings), *plugin_dirs, *args]
+
+
+SWITCH_ENV = "RIG_SWITCH_FILE"
+CURRENT_RIG_ENV = "RIG_CURRENT"
+
+
+def switch_file() -> Path:
+    """Where a session this rig process launched records a switch: one file per rig process."""
+    return rig_home() / "switch" / f"{os.getpid()}.yml"
+
+
+def take_switch(path: Path) -> dict | None:
+    """SWITCH-02: the switch a session recorded before it exited, removed once read."""
+    if not path.exists():
+        return None
+    switch = read_yaml(path)
+    path.unlink()
+    return switch
+
+
+def run_claude(args: list[str], env: dict[str, str]) -> int:
+    """LAUNCH-06: run Claude Code as a child, leaving Ctrl-C to it, and return its exit status.
+
+    The handlers are Python functions rather than SIG_IGN, since an ignored signal stays ignored across exec."""
+    import signal
+    try:
+        child = subprocess.Popen(["claude", *args], env={**os.environ, **env})
+    except FileNotFoundError:
+        fail("claude is not on PATH.")
+    forward = lambda signum, _frame: child.send_signal(signum)
+    previous = {sig: signal.signal(sig, handler) for sig, handler in (
+        (signal.SIGINT, lambda *_: None), (signal.SIGQUIT, lambda *_: None),
+        (signal.SIGTERM, forward), (signal.SIGHUP, forward))}
+    try:
+        status = child.wait()
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+    return 128 - status if status < 0 else status
+
+
+def cmd_switch(args: list[str]) -> int:
+    """SWITCH-01, SWITCH-03..05: record the rig a session switches to once Claude Code exits."""
+    session = None
+    if "--session" in args:
+        at = args.index("--session")
+        session = args[at + 1] if at + 1 < len(args) else None
+        args = args[:at] + args[at + 2:]
+    if not session or len(args) > 1:
+        fail("switch takes a rig name and the session id: rig switch [<rig>] --session <id>")
+    config = load_config()
+    rigs = config["rigs"] if config else {}
+    current = os.environ.get(CURRENT_RIG_ENV)
+    if not args:
+        for name in rigs:
+            print(f"{name}{' (this session)' if name == current else ''}")
+        return 0
+    name = args[0]
+    if name not in rigs:
+        fail(f"no rig named {name}. Rigs: {', '.join(rigs) or 'none'}")
+    request = os.environ.get(SWITCH_ENV)
+    if not request:
+        fail(f"this session wasn't launched by rig at a terminal, so rig can't relaunch it. Exit Claude Code, "
+             f"then run: rig use {name} --resume {session}")
+    if name == current:
+        print(f"{PROG}: this session already uses rig {name}.")
+        return 0
+    write_yaml(Path(request), {"rig": name, "session": session})
+    print(f"{PROG}: exit Claude Code (/exit), and rig relaunches this conversation with rig {name}.")
+    return 0
 
 
 def cmd_use(args: list[str]) -> int:
@@ -1630,8 +1720,9 @@ COMMANDS = {
     "completions": cmd_completions,
     "complete": cmd_complete,
     "freshness": cmd_freshness,
+    "switch": cmd_switch,
 }
-UNCOMPLETED_COMMANDS = {"completions", "complete", "freshness"}
+UNCOMPLETED_COMMANDS = {"completions", "complete", "freshness", "switch"}
 CLAUDE_SUBCOMMANDS_TAKEN = {"plugin": ("pin", "unpin"), "plugins": ("pin", "unpin")}
 
 

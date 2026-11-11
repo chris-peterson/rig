@@ -115,6 +115,24 @@ refuses edits there otherwise
 ([anthropics/claude-code#95982](https://github.com/anthropics/claude-code/issues/95982)).
 A value you set yourself wins.
 
+## Switching rigs mid-session
+
+```text
+/rig:switch web
+```
+
+A session can't change its plugins while it runs, so the switch happens across
+a restart that keeps the conversation: `/rig:switch` records the rig you name,
+you type `/exit`, and rig relaunches the same conversation with that rig. The
+launch confirmation opens first when the new rig leaves pins to choose. The
+sandbox stays as the session had it; other Claude Code arguments from the
+first launch don't carry over. `/rig:switch` with no rig lists the rigs.
+
+rig stays running while Claude Code does, which is how it sees the exit. A
+session started without rig, or with nobody at a terminal, can't be relaunched
+this way; the switch prints the `rig use <rig> --resume <id>` command to run
+after you exit.
+
 ## Sandbox
 
 ```bash
