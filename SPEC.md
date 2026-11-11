@@ -14,10 +14,11 @@ below its category's heading, so every requirement has a linkable anchor
 
 ## Concepts
 
-- **rig**: a named set of plugins chosen for a kind of work. A rig can extend
-  or include other rigs, so a base rig carries the plugins every rig shares.
-- **base rig**: the rig first-run setup creates from the plugins you want in
-  every session; other rigs extend it.
+- **rig**: a named set of plugins chosen for a kind of work. Every rig but the
+  base rig extends one other rig and loads its plugins too, so each rig carries
+  the base rig's plugins.
+- **base rig**: the one rig that extends no other. First-run setup creates it
+  from the plugins you want in every session.
 - **default rig**: the rig a launch uses when it names none.
 - **pin**: a local plugin checkout that stands in for the plugin's installed
   copy, so changes to the checkout can be used for a stretch of real work
@@ -36,12 +37,12 @@ The system shall read rig definitions from a user-level file, each naming the
 plugins it loads.
 
 #### `RIG-02`
-Where a rig extends or includes other rigs, the system shall load the plugins
-of each of those rigs along with its own.
+Where a rig extends another rig, the system shall load the plugins of that
+rig, and of the rig it extends in turn, along with its own.
 
 #### `RIG-03`
-If the rigs a rig extends or includes form a cycle, then the system shall
-refuse the launch, naming the rigs in the cycle.
+If the rigs a rig extends form a cycle, then the system shall refuse the
+launch, naming the rigs in the cycle.
 
 #### `RIG-04`
 When a launch uses a rig, the system shall start Claude Code with that rig's
@@ -57,7 +58,7 @@ with the default rig.
 
 #### `RIG-07`
 When the user runs `rig list`, the system shall list each rig with its plugins
-and the rigs it extends or includes.
+and the rig it extends.
 
 #### `RIG-08`
 If a rig names a plugin that is not installed, then the system shall offer to
@@ -68,6 +69,14 @@ user declines.
 If a rig names a plugin that is not installed and no one is at a terminal to
 confirm, then the system shall refuse the launch, naming the plugin.
 
+#### `RIG-10`
+If a rig extends more than one rig, then the system shall refuse the launch,
+naming the rig.
+
+#### `RIG-11`
+If more than one rig extends no other rig, then the system shall refuse the
+launch, naming those rigs.
+
 ### `SETUP`
 First-run setup
 
@@ -76,35 +85,89 @@ When an interactive launch finds no rig definitions, the system shall run
 first-run setup before launching.
 
 #### `SETUP-02`
-During first-run setup, the system shall list the plugins Claude Code's
-settings enable and ask which of them form the base rig.
+When first-run setup opens the rig editor, the system shall start a base rig
+with the plugins Claude Code's settings enable already selected.
 
 #### `SETUP-03`
-When the user confirms the base rig, the system shall write it to the rig
-definitions as the default rig.
+When the user saves first-run setup, the system shall write the base rig to the
+rig definitions as the default rig.
 
 #### `SETUP-04`
-After writing the base rig, the system shall offer to create named rigs that
-extend it, until each enabled plugin outside the base rig is in at least one
-rig or the user stops.
+While the rig editor is open, the system shall show a draft rig, extending the
+base rig, for each group of enabled plugins that no rig loads, saving a
+draft only once the user keeps it under a name.
 
 #### `SETUP-04a`
 Where the `enabledPlugins` block of the user's Claude Code settings file
-separates its entries into groups with blank lines, the system shall suggest
-one named rig per group of plugins outside the base rig, asking the user to
-name each.
+separates its entries into groups with blank lines, the system shall make one
+draft rig per group.
 
 #### `SETUP-04b`
 Where the `enabledPlugins` block has no blank-line groups, the system shall
-suggest one named rig per marketplace, named after the marketplace.
+make one draft rig per marketplace, named after the marketplace.
 
 #### `SETUP-05`
-When the user runs `rig setup`, the system shall run first-run setup, starting
-from the existing rig definitions.
+When the user runs `rig setup`, the system shall open the rig editor on the
+existing rig definitions.
 
 #### `SETUP-06`
 If a launch finds no rig definitions and no one is at a terminal, then the
 system shall refuse the launch, naming `rig setup`.
+
+### `EDITOR`
+Rig editor
+
+#### `EDITOR-01`
+The rig editor shall show the rigs in one pane as a tree rooted at the base
+rig, each rig appearing once, under the rig it extends, and the plugins of the
+selected rig in a second pane.
+
+#### `EDITOR-02`
+The rig editor shall offer every installed plugin, and every plugin a rig
+names, as a candidate for the selected rig.
+
+#### `EDITOR-03`
+The rig editor shall move through rigs and plugins with the arrow keys or the
+mouse, and toggle the highlighted plugin with space or a click.
+
+#### `EDITOR-04`
+The rig editor shall show the plugins the selected rig inherits as included and
+locked, naming the rig each comes from.
+
+#### `EDITOR-05`
+When the user creates a rig or changes the rig a rig extends, the system shall
+require one rig to extend, offering only the rigs that would not form a cycle.
+
+#### `EDITOR-06`
+When the user marks a rig as the default, the system shall make it the rig a
+launch uses when it names none.
+
+#### `EDITOR-07`
+If the user deletes the base rig, the default rig, or a rig that other rigs
+extend, then the system shall refuse, saying which.
+
+#### `EDITOR-08`
+When the user saves, the system shall write the rigs to the rig definitions
+file, the base rig first and the rest in alphabetical order, each with its
+plugins in alphabetical order.
+
+#### `EDITOR-09`
+If the user quits the rig editor with unsaved changes, then the system shall
+ask whether to save them, with saving as the default choice and discarding as
+the other.
+
+#### `EDITOR-10`
+When the user double-clicks a rig or a draft, or presses enter on it, the
+system shall open it for naming, and for choosing the rig it extends unless it
+is the base rig.
+
+#### `EDITOR-11`
+When the user renames a rig, the system shall carry the new name to the rigs
+that extend it and to the default.
+
+#### `EDITOR-12`
+The rig editor shall list the rigs that extend each rig in alphabetical order,
+re-sorting them as rigs are created, renamed, or moved.
 
 ### `PIN`
 Local pins
@@ -155,10 +218,6 @@ Sandbox
 Where a launch passes `--sandbox`, the system shall start Claude Code with the
 sandbox on, failing if the sandbox is unavailable and allowing no unsandboxed
 commands.
-
-#### `SANDBOX-02`
-Where a rig's definition turns the sandbox on, the system shall sandbox every
-launch of that rig.
 
 ### `LAUNCH`
 Launch

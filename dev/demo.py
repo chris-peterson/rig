@@ -45,12 +45,8 @@ rigs:
   base:
     plugins: [anchor@acme, beacon@acme]
   web:
-    extends: [base]
+    extends: base
     plugins: [frontend-design@acme]
-  locked:
-    extends: [base]
-    plugins: []
-    sandbox: true
 """
 
 
@@ -78,13 +74,13 @@ def main() -> None:
             subprocess.run([sys.executable, str(RIG), *args], env=env, cwd=home, stdin=subprocess.DEVNULL,
                            stderr=subprocess.STDOUT)
 
-        print("A throwaway HOME with four installed plugins and three rigs. The stand-in claude prints its arguments.")
+        print("A throwaway HOME with four installed plugins and two rigs. The stand-in claude prints its arguments.")
         step("the rigs", "list")
         step("plain launch: the default rig only, everything else off", "-p", "hi")
         step("a named rig adds its plugins to the ones it extends", "use", "web", "-p", "hi")
         step("pin a local checkout of anchor", "pin", "src/anchor")
         step("the rig includes anchor, so the checkout stands in for the installed copy", "-p", "hi")
-        step("a rig can turn the sandbox on for every launch", "use", "locked", "-p", "hi")
+        step("--sandbox turns the sandbox on for one launch", "use", "web", "--sandbox", "-p", "hi")
         step("Claude Code's own subcommands go through untouched", "plugin", "list")
 
 

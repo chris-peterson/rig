@@ -6,22 +6,30 @@ Maintained by `/sextant:spec-status`.
 **Last audit:** 2026-11-10
 **Spec version:** root SPEC.md (unversioned)
 **Plugin version:** unreleased
-**Coverage:** 43 Covered, 0 Partial, 0 Missing/Contradicts
+**Coverage:** 56 Covered, 0 Partial, 0 Missing/Contradicts
 **Evidence pointers:** file
 
 ## Status by category
 
 | Prefix | Count | Status | Notes |
 |--------|------:|--------|-------|
-| RIG-01..09 | 9 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. RIG-04 is a per-launch `--settings` overlay of `enabledPlugins`, which outranks user and project settings (verified 2026-11-10) |
-| SETUP-01..06 | 8 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. Includes SETUP-04a..b. SETUP-04a reads the settings file as text, since the blank lines don't survive a JSON parse. `claude plugin disable` rewrites the file without them (verified 2026-11-10, Claude Code project scope), so the groups last only in a file edited by hand |
+| RIG-01..11 | 11 | All Covered | `scripts/rig` (`load_config`, `resolve`), tests in `tests/test_rig.py`. RIG-04 is a per-launch `--settings` overlay of `enabledPlugins`, which outranks user and project settings (verified 2026-11-10) |
+| SETUP-01..06 | 8 | All Covered | `scripts/rig` (`RigEdits`, `setup`, `launch`), tests in `tests/test_rig.py`; SETUP-01 and SETUP-05 drive the editor through a pty. Includes SETUP-04a..b. SETUP-04a reads the settings file as text, since the blank lines don't survive a JSON parse. `claude plugin disable` rewrites the file without them (verified 2026-11-10, Claude Code project scope), so the groups last only in a file edited by hand |
+| EDITOR-01..12 | 12 | All Covered | `scripts/rig` (`RigEdits`, `editor_app`), tests in `tests/test_rig.py` drive it headless with Textual's pilot, keys and clicks |
 | PIN-01..10 | 10 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. PIN-08 uses `--plugin-dir`: the checkout loads as `<name>@inline` and the installed copy doesn't load, including when the overlay disables it (verified 2026-11-10) |
-| SANDBOX-01..02 | 2 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. The overlay carries ai-sdlc's strict sandbox block; a launch on a machine without the sandbox hasn't been tried |
+| SANDBOX-01 | 1 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. The overlay carries ai-sdlc's strict sandbox block; a launch on a machine without the sandbox hasn't been tried |
 | LAUNCH-01..04 | 4 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. A launch whose arguments carry `--settings` is refused, since a second `--settings` replaces the first (verified 2026-11-10) |
 | SHELL-01..04 | 4 | All Covered | `scripts/rig`, `commands/install-rig.md`, `hooks/cli-freshness.sh`; tests run the install against a throwaway HOME |
 | TAB-01..06 | 6 | All Covered | `scripts/rig` (`ZSH_COMPLETION`); tests check parity, zsh syntax, and the awk readers. Not yet exercised in a live shell |
 
 ## Audit history
+
+### 2026-11-10: Rig editor (spec-status)
+
+STATUS.md updated: +12 EDITOR IDs, RIG-10..11 added, SANDBOX-02 removed,
+SETUP-02..05 reworded for the rig editor, all Covered. Coverage 56 of 56. A rig
+extends one rig, every rig but the base rig extends one, and a rig's definition
+no longer carries the sandbox.
 
 ### 2026-11-10: Retired RIG requirements removed, RIG renumbered
 

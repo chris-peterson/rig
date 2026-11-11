@@ -30,12 +30,34 @@ A rig is a named list of plugins. A launch enables exactly that list, plus the
 pins below, and turns every other plugin off for that session only. Your Claude
 Code settings stay as they are.
 
-The first launch at a terminal with no rigs runs setup: it lists the plugins
-your Claude Code settings enable and asks which ones every session needs. Those
-become the **base** rig, the default. Setup then suggests named rigs for the
-rest, each extending the base. If your settings file separates its
-`enabledPlugins` entries with blank lines, each group becomes a suggestion;
-otherwise each marketplace does. Run `rig setup` again any time to revise.
+Every rig but the base rig extends one other rig, so every rig carries the
+base rig's plugins.
+
+`rig setup` opens the rig editor: your rigs on the left, as a tree rooted at
+the base rig with each rig under the one it extends, and the selected rig's
+plugins on the right. Move with the arrow
+keys or the mouse, and toggle a plugin with space or a click. Plugins a rig
+inherits show as locked, naming the rig they come from; change them on that
+rig.
+
+The first launch at a terminal with no rigs opens the editor before starting
+Claude Code, with a **base** rig holding the plugins your settings enable. Turn
+off the ones not every session needs. Each group of enabled plugins that no rig
+loads shows as a draft under the base rig: press `s` on a draft to name it
+and save it as a rig. If your settings file separates its `enabledPlugins`
+entries with blank lines, each group becomes a draft; otherwise each
+marketplace does.
+
+| Key | Does |
+| --- | --- |
+| `space`, click | toggle the highlighted plugin in the selected rig |
+| `tab` | move between the rigs and the plugins |
+| `n` | new rig, extending the selected rig unless you choose another |
+| double-click, `enter`, `e` | edit the selected rig's name and the rig it extends; on a draft, name it and save it as a rig |
+| `d` | make the selected rig the default |
+| `x` | delete the selected rig, unless it's the base rig, the default, or extended by another |
+| `s` | save to `~/.rig/rigs.yml`; on a draft, name it and save it as a rig |
+| `q` | quit; with unsaved changes, asks first: save (the default, `enter` or `s`) or discard (`d`) |
 
 ```bash
 rig                      # the default rig
@@ -86,18 +108,8 @@ own checkout reviews edits to itself.
 rig --sandbox            # this launch only
 ```
 
-Or turn it on for every launch of a rig:
-
-```yaml
-rigs:
-  untrusted:
-    extends: [base]
-    sandbox: true
-```
-
 The sandbox runs Bash commands in Claude Code's sandbox, fails the launch when
-the sandbox isn't available, and allows no unsandboxed commands. A rig that
-extends a sandboxed rig is sandboxed too.
+the sandbox isn't available, and allows no unsandboxed commands.
 
 ## What a launch shows
 

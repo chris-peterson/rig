@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import importlib.machinery
 import importlib.util
 import json
@@ -9,13 +10,17 @@ import os
 import pty
 import re
 import select
+import struct
 import subprocess
 import sys
 import tempfile
+import termios
 import textwrap
 import time
 import unittest
 from pathlib import Path
+
+KEYS = {"space": b" ", "enter": b"\r", "down": b"\x1b[B", "s": b"s", "q": b"q", "d": b"d"}
 
 REPO = Path(__file__).resolve().parent.parent
 RIG = REPO / "scripts" / "rig"
@@ -77,17 +82,23 @@ class RigCase(unittest.TestCase):
         return subprocess.run([sys.executable, str(RIG), *args], capture_output=True, text=True,
                               env={**self.env, **(env or {})}, cwd=cwd or self.home, stdin=subprocess.DEVNULL)
 
-    def rig_tty(self, *args: str, answers: str = "", cwd: Path | None = None) -> tuple[int, str]:
-        """Run rig with a terminal on stdin and stderr, typing the answers; returns (status, terminal text)."""
+    def rig_tty(self, *args: str, answers: str = "", keys: list[str] = (), cwd: Path | None = None) -> tuple[int, str]:
+        """Run rig with a terminal on stdin and stderr, typing the answers, or pressing the keys once a
+        full-screen app is drawing; returns (status, terminal text)."""
         master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 110, 0, 0))
         proc = subprocess.Popen([sys.executable, str(RIG), *args], stdin=slave, stderr=slave,
                                 stdout=slave, env=self.env, cwd=cwd or self.home)
         os.close(slave)
         os.write(master, answers.encode())
+        pending = [KEYS[key] for key in keys]
         output = b""
-        deadline = time.monotonic() + 20
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
-            ready, _, _ = select.select([master], [], [], 0.1)
+            ready, _, _ = select.select([master], [], [], 0.3)
+            if pending and not ready and b"\x1b[?1049h" in output:
+                os.write(master, pending.pop(0))
+                continue
             if ready:
                 try:
                     chunk = os.read(master, 4096)
@@ -138,7 +149,7 @@ BASIC_RIGS = """\
       base:
         plugins: [a@m, b@m]
       web:
-        extends: [base]
+        extends: base
         plugins: [c@n]
     """
 
@@ -163,13 +174,50 @@ class Rigs(RigCase):
         self.write_rigs("""\
             default: a
             rigs:
-              a: {extends: [b], plugins: []}
-              b: {extends: [a], plugins: []}
+              base: {plugins: []}
+              a: {extends: b, plugins: []}
+              b: {extends: a, plugins: []}
             """)
         result = self.rig("-p", "hi")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("a → b → a", result.stderr)
         self.assertEqual(self.claude_calls(), [])
+
+    def test_rig_10_more_than_one_extends_refused(self):
+        self.write_rigs("""\
+            default: base
+            rigs:
+              base: {plugins: []}
+              tools: {plugins: []}
+              web: {extends: [base, tools], plugins: []}
+            """)
+        result = self.rig("-p", "hi")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rig web", result.stderr)
+        self.assertIn("extends more than one rig", result.stderr)
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_rig_11_second_rig_extending_nothing_refused(self):
+        self.write_rigs("""\
+            default: base
+            rigs:
+              base: {plugins: []}
+              tools: {plugins: []}
+            """)
+        result = self.rig("-p", "hi")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rigs base, tools", result.stderr)
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_rig_setting_other_than_plugins_and_extends_refused(self):
+        self.write_rigs("""\
+            default: base
+            rigs:
+              base: {plugins: [], sandbox: true}
+            """)
+        result = self.rig("-p", "hi")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("a rig has plugins and extends, not sandbox", result.stderr)
 
     def test_rig_04_only_rig_plugins_enabled(self):
         self.write_settings(self.home, {"d@n": True, "e@n": True})
@@ -514,8 +562,6 @@ class Sandbox(RigCase):
             default: base
             rigs:
               base: {plugins: [a@m]}
-              locked: {extends: [base], plugins: [], sandbox: true}
-              inner: {extends: [locked], plugins: []}
             """)
         self.write_installed("a@m")
 
@@ -539,20 +585,10 @@ class Sandbox(RigCase):
         self.assertNotIn("sandbox", overlay)
         self.assertEqual(args, ["-p", "--", "--sandbox"])
 
-    def test_sandbox_02_rig_turns_sandbox_on(self):
-        for name in ("locked", "inner"):
-            self.argv_log.unlink(missing_ok=True)
-            result = self.rig("use", name, "-p", "hi")
-            self.assertIn("sandbox", self.launched()[0], name)
-            self.assertIn("sandbox: on", result.stderr)
-
     def test_launch_02_sandbox_off_line(self):
         result = self.rig("-p", "hi")
         self.assertNotIn("sandbox", self.launched()[0])
         self.assertTrue(result.stderr.endswith("pins: none\nsandbox: off\n"), result.stderr)
-
-    def test_rig_07_list_shows_sandbox(self):
-        self.assertIn("locked\n  extends: base\n  plugins: none\n  sandbox: on\n", self.rig("list").stdout)
 
 
 GROUPED_SETTINGS = """{
@@ -583,9 +619,12 @@ FLAT_SETTINGS = """{
 
 
 class Setup(RigCase):
+    """First-run setup and `rig setup` driven through a terminal, as a person would."""
+
     def setUp(self):
         super().setUp()
         self.write_installed("a@m", "b@m", "c@n", "d@n", "e@o", "f@o")
+        self.env["TERM"] = "xterm-256color"
 
     def settings(self, text: str) -> None:
         path = self.home / ".claude" / "settings.json"
@@ -598,69 +637,38 @@ class Setup(RigCase):
 
     def test_setup_01_interactive_launch_runs_setup_then_launches(self):
         self.settings(FLAT_SETTINGS)
-        status, output = self.rig_tty(answers="1 2\nq\n")
+        status, output = self.rig_tty(keys=["space", "s", "q"])
         self.assertEqual(status, 0, output)
-        self.assertIn("first-run setup", output)
         self.assertEqual(self.config()["default"], "base")
         enabled = self.launched()[0]["enabledPlugins"]
-        self.assertEqual({k for k, v in enabled.items() if v}, {"a@m", "b@m"})
+        self.assertEqual({k for k, v in enabled.items() if v}, {"b@m", "c@n", "d@n", "e@o"})
 
-    def test_setup_02_lists_enabled_plugins(self):
-        self.settings(GROUPED_SETTINGS)
-        _, output = self.rig_tty("setup", answers="1-2\nq\n")
-        self.assertIn("1  a@m", output)
-        self.assertIn("5  e@o", output)
-        self.assertNotIn("f@o", output)
-
-    def test_setup_03_base_rig_written_as_default(self):
+    def test_setup_01_launch_stops_when_setup_saves_nothing(self):
         self.settings(FLAT_SETTINGS)
-        self.rig_tty("setup", answers="1,2\nq\n")
-        config = self.config()
-        self.assertEqual(config["default"], "base")
-        self.assertEqual(config["rigs"]["base"]["plugins"], ["a@m", "b@m"])
+        status, output = self.rig_tty(keys=["q", "d"])
+        self.assertNotEqual(status, 0)
+        self.assertIn("setup closed without saving any rigs", output)
+        self.assertEqual(self.claude_calls(), [])
 
-    def test_setup_04a_one_rig_per_blank_line_group(self):
-        self.settings(GROUPED_SETTINGS)
-        status, output = self.rig_tty("setup", answers="1 2\nweb\ntools\n")
-        self.assertEqual(status, 0, output)
-        rigs = self.config()["rigs"]
-        self.assertEqual(rigs["web"], {"extends": ["base"], "plugins": ["c@n", "d@n"]})
-        self.assertEqual(rigs["tools"], {"extends": ["base"], "plugins": ["e@o"]})
-
-    def test_setup_04b_one_rig_per_marketplace(self):
-        self.settings(FLAT_SETTINGS)
-        status, output = self.rig_tty("setup", answers="1 2\n\nmine\n")
-        self.assertEqual(status, 0, output)
-        self.assertIn("Name it [n]", output)
-        rigs = self.config()["rigs"]
-        self.assertEqual(rigs["n"]["plugins"], ["c@n", "d@n"])
-        self.assertEqual(rigs["mine"]["plugins"], ["e@o"])
-
-    def test_setup_04_offers_rigs_until_every_plugin_is_covered(self):
-        self.settings(FLAT_SETTINGS)
-        status, output = self.rig_tty("setup", answers="1 2\n-\n-\n1 3\nmix\n1\nlast\n")
-        self.assertEqual(status, 0, output)
-        rigs = self.config()["rigs"]
-        self.assertEqual(rigs["mix"]["plugins"], ["c@n", "e@o"])
-        self.assertEqual(rigs["last"]["plugins"], ["d@n"])
-        self.assertEqual(output.count("aren't in any rig yet"), 2)
-
-    def test_setup_05_rerun_starts_from_existing_rigs(self):
+    def test_setup_05_rerun_opens_existing_rigs(self):
         self.settings(FLAT_SETTINGS)
         self.write_rigs("""\
             default: core
             rigs:
               core: {plugins: [a@m]}
-              web: {extends: [core], plugins: [c@n, d@n]}
+              web: {extends: core, plugins: [c@n, d@n]}
             """)
-        status, output = self.rig_tty("setup", answers="\nq\n")
+        status, output = self.rig_tty("setup", keys=["down", "space", "s", "q"])
         self.assertEqual(status, 0, output)
-        self.assertIn("*  1  a@m", output)
-        self.assertIn("   2  b@m", output)
-        self.assertNotIn("Name it [n]", output)
         config = self.config()
         self.assertEqual(config["default"], "core")
+        self.assertEqual(config["rigs"]["core"]["plugins"], ["a@m", "b@m"])
         self.assertEqual(config["rigs"]["web"]["plugins"], ["c@n", "d@n"])
+
+    def test_setup_needs_a_terminal(self):
+        result = self.rig("setup")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("needs a terminal", result.stderr)
 
     def test_setup_06_headless_launch_without_rigs_refused(self):
         self.settings(FLAT_SETTINGS)
@@ -668,6 +676,384 @@ class Setup(RigCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("run `rig setup`", result.stderr)
         self.assertEqual(self.claude_calls(), [])
+
+
+ENABLED = ["a@m", "b@m", "c@n", "d@n", "e@o"]
+GROUPS = [["a@m", "b@m"], ["c@n", "d@n"], ["e@o"]]
+INSTALLED = [*ENABLED, "f@o"]
+
+
+def three_rigs() -> dict:
+    """base, web extending base, and web-ui extending web."""
+    return {"default": "base", "clones": {}, "rigs": {
+        "base": {"plugins": ["a@m", "b@m"], "extends": None},
+        "web": {"plugins": ["c@n"], "extends": "base"},
+        "web-ui": {"plugins": ["d@n"], "extends": "web"},
+    }}
+
+
+class Edits(unittest.TestCase):
+    """The rig editor's changes to the rig definitions, apart from the screen."""
+
+    rig = load_rig()
+
+    def existing(self):
+        return self.rig.RigEdits(three_rigs(), ENABLED, [], INSTALLED)
+
+    def first_run(self, groups=()):
+        edits = self.rig.RigEdits(None, ENABLED, list(groups), INSTALLED)
+        for plugin_id in ("c@n", "d@n", "e@o"):
+            edits.toggle("base", plugin_id, False)
+        return edits
+
+    def test_setup_02_first_run_starts_base_with_enabled_plugins(self):
+        edits = self.rig.RigEdits(None, ENABLED, [], INSTALLED)
+        self.assertEqual(edits.base, "base")
+        self.assertEqual(edits.default, "base")
+        self.assertEqual(edits.rigs["base"]["plugins"], ENABLED)
+        self.assertEqual(edits.drafts(), [])
+        self.assertTrue(edits.dirty)
+
+    def test_setup_04a_one_draft_per_blank_line_group(self):
+        self.assertEqual(self.first_run(GROUPS).drafts(), [(None, ["c@n", "d@n"]), (None, ["e@o"])])
+
+    def test_setup_04b_one_draft_per_marketplace(self):
+        self.assertEqual(self.first_run().drafts(), [("n", ["c@n", "d@n"]), ("o", ["e@o"])])
+
+    def test_setup_04_draft_kept_under_a_name(self):
+        edits = self.first_run()
+        edits.keep_draft(0, "web", "base")
+        self.assertEqual(edits.rigs["web"], {"plugins": ["c@n", "d@n"], "extends": "base"})
+        self.assertEqual(edits.drafts(), [("o", ["e@o"])])
+
+    def test_editor_02_candidates_are_installed_and_named_plugins(self):
+        config = {"default": "base", "rigs": {"base": {"plugins": ["z@gone"], "extends": None}}}
+        edits = self.rig.RigEdits(config, ["a@m"], [], INSTALLED)
+        self.assertEqual(set(edits.candidates), {*INSTALLED, "z@gone"})
+
+    def test_editor_04_inherited_plugins_name_their_rig(self):
+        self.assertEqual(self.existing().inherited("web-ui"), {"a@m": "base", "b@m": "base", "c@n": "web"})
+
+    def test_editor_05_extends_one_rig_without_a_cycle(self):
+        edits = self.existing()
+        self.assertEqual(edits.parent_choices("web"), ["base"])
+        self.assertEqual(edits.parent_choices("web-ui"), ["base", "web"])
+        self.assertEqual(edits.parent_choices(None), ["base", "web", "web-ui"])
+        with self.assertRaisesRegex(self.rig.Refused, "cycle"):
+            edits.set_extends("web", "web-ui")
+        with self.assertRaisesRegex(self.rig.Refused, "base rig"):
+            edits.set_extends("base", "web")
+        with self.assertRaisesRegex(self.rig.Refused, "extends one rig"):
+            edits.create("tools", None)
+        edits.set_extends("web-ui", "base")
+        self.assertEqual(edits.rigs["web-ui"]["extends"], "base")
+
+    def test_editor_06_default(self):
+        edits = self.existing()
+        edits.make_default("web")
+        self.assertEqual(edits.default, "web")
+
+    def test_editor_07_delete_refusals(self):
+        edits = self.existing()
+        with self.assertRaisesRegex(self.rig.Refused, "while web-ui extends it"):
+            edits.delete("web")
+        with self.assertRaisesRegex(self.rig.Refused, "base rig"):
+            edits.delete("base")
+        edits.make_default("web-ui")
+        with self.assertRaisesRegex(self.rig.Refused, "default rig"):
+            edits.delete("web-ui")
+        edits.make_default("base")
+        edits.delete("web-ui")
+        self.assertNotIn("web-ui", edits.rigs)
+
+    def test_editor_11_rename_carries_to_children_and_default(self):
+        edits = self.existing()
+        edits.make_default("web")
+        edits.edit("web", "front", "base")
+        self.assertEqual(list(edits.rigs), ["base", "front", "web-ui"])
+        self.assertEqual(edits.rigs["web-ui"]["extends"], "front")
+        self.assertEqual(edits.default, "front")
+        edits.edit("base", "core", None)
+        self.assertEqual(edits.rigs["front"]["extends"], "core")
+        self.assertEqual(edits.base, "core")
+
+    def test_editor_10_refused_edit_changes_nothing(self):
+        edits = self.existing()
+        with self.assertRaisesRegex(self.rig.Refused, "cycle"):
+            edits.edit("web", "front", "web-ui")
+        with self.assertRaisesRegex(self.rig.Refused, "already a rig"):
+            edits.edit("web", "web-ui", "base")
+        self.assertEqual(edits.rigs["web"]["extends"], "base")
+        self.assertIn("web", edits.rigs)
+
+    def test_editor_12_rigs_listed_alphabetically_as_they_change(self):
+        edits = self.existing()
+        edits.create("zeta", "base")
+        edits.create("Alpha", "base")
+        self.assertEqual(edits.children("base"), ["Alpha", "web", "zeta"])
+        edits.rename("zeta", "beta")
+        self.assertEqual(edits.children("base"), ["Alpha", "beta", "web"])
+        edits.set_extends("web-ui", "base")
+        self.assertEqual(edits.children("base"), ["Alpha", "beta", "web", "web-ui"])
+
+    def test_editor_08_saved_in_alphabetical_order(self):
+        config = three_rigs()
+        config["rigs"] = {"web": {"plugins": ["z@m", "a@m"], "extends": "base"},
+                          "base": {"plugins": ["b@m"], "extends": None},
+                          "api": {"plugins": [], "extends": "base"}}
+        edits = self.rig.RigEdits(config, [], [], [])
+        edits.toggle("base", "a@m", True)
+        self.assertEqual(edits.rigs["base"]["plugins"], ["a@m", "b@m"])
+        with tempfile.TemporaryDirectory() as home:
+            previous, os.environ["HOME"] = os.environ["HOME"], home
+            try:
+                edits.save()
+                import yaml
+                saved = yaml.safe_load((Path(home) / ".rig" / "rigs.yml").read_text())
+            finally:
+                os.environ["HOME"] = previous
+        self.assertEqual(list(saved["rigs"]), ["base", "api", "web"])
+        self.assertEqual(saved["rigs"]["web"]["plugins"], ["a@m", "z@m"])
+
+    def test_new_rig_name_checked(self):
+        edits = self.existing()
+        with self.assertRaisesRegex(self.rig.Refused, "already a rig"):
+            edits.create("web", "base")
+        with self.assertRaisesRegex(self.rig.Refused, "letters, digits"):
+            edits.create("no spaces", "base")
+
+
+class Editor(unittest.IsolatedAsyncioTestCase):
+    """The rig editor on screen, driven by keys and clicks."""
+
+    rig = load_rig()
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._home = os.environ.get("HOME")
+        os.environ["HOME"] = self._tmp.name
+
+    def tearDown(self):
+        os.environ["HOME"] = self._home
+        self._tmp.cleanup()
+
+    def existing(self):
+        return self.rig.RigEdits(three_rigs(), ENABLED, [], INSTALLED)
+
+    def saved(self) -> dict:
+        import yaml
+        return yaml.safe_load((Path(self._tmp.name) / ".rig" / "rigs.yml").read_text())
+
+    def running(self, edits):
+        app = self.rig.editor_app(edits)
+        return app, app.run_test(size=(110, 30))
+
+    def options(self, app) -> list[tuple[str, bool, bool]]:
+        """(plugin, selected, locked) for each row of the plugins pane."""
+        listing = app.screen.query_one("#plugins")
+        rows = [listing.get_option_at_index(i) for i in range(listing.option_count)]
+        return [(row.value, row.value in listing.selected, row.disabled) for row in rows]
+
+    def tree_rigs(self, app) -> list[tuple[str, str]]:
+        """(rig, the rig it sits under, or '' at the top) for every rig in the tree, in order."""
+        found, stack = [], [(node, "") for node in app.screen.query_one("#rigs").root.children]
+        while stack:
+            node, parent = stack.pop(0)
+            if node.data[0] == "rig":
+                found.append((node.data[1], parent))
+                stack[:0] = [(child, node.data[1]) for child in node.children]
+        return found
+
+    def test_setup_04a_groups_read_from_the_settings_file(self):
+        path = Path(self._tmp.name) / ".claude" / "settings.json"
+        path.parent.mkdir()
+        path.write_text(GROUPED_SETTINGS)
+        edits = self.rig.open_edits()
+        self.assertEqual(edits.rigs["base"]["plugins"], ENABLED)
+        edits.toggle("base", "e@o", False)
+        self.assertEqual(edits.drafts(), [(None, ["e@o"])])
+
+    async def test_editor_01_each_rig_once_under_the_rig_it_extends(self):
+        app, running = self.running(self.existing())
+        async with running as pilot:
+            await pilot.pause()
+            self.assertEqual(self.tree_rigs(app), [("base", ""), ("web", "base"), ("web-ui", "web")])
+
+    async def test_editor_03_space_and_click_toggle_plugins(self):
+        edits = self.rig.RigEdits(None, ENABLED, [], INSTALLED)
+        app, running = self.running(edits)
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("space")
+            await pilot.pause()
+            self.assertNotIn("a@m", edits.rigs["base"]["plugins"])
+            row = [value for value, _, _ in self.options(app)].index("f@o")
+            await pilot.click(app.screen.query_one("#plugins"), offset=(4, row + 1))
+            await pilot.pause()
+            self.assertIn("f@o", edits.rigs["base"]["plugins"])
+            await pilot.press("s")
+            await pilot.pause()
+        self.assertEqual(self.saved()["rigs"]["base"], {"plugins": ["b@m", "c@n", "d@n", "e@o", "f@o"]})
+
+    async def test_editor_04_inherited_plugins_shown_locked(self):
+        app, running = self.running(self.existing())
+        async with running as pilot:
+            await pilot.pause()
+            app.screen.query_one("#rigs").focus()
+            await pilot.press("down")
+            await pilot.pause()
+            rows = {value: (selected, locked) for value, selected, locked in self.options(app)}
+            self.assertEqual(rows["a@m"], (True, True))
+            self.assertEqual(rows["c@n"], (True, False))
+            self.assertEqual(rows["d@n"], (False, False))
+            self.assertIn("from base", str(app.screen.query_one("#plugins").get_option_at_index(0).prompt))
+
+    async def test_editor_05_extends_dialog_offers_one_cycle_free_rig(self):
+        edits = self.existing()
+        app, running = self.running(edits)
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+            self.assertEqual(len(app.screen.query("#extends")), 0)
+            await pilot.press("escape")
+            app.screen.query_one("#rigs").focus()
+            await pilot.press("down", "e")
+            await pilot.pause()
+            choices = [str(button.label) for button in app.screen.query("#extends RadioButton")]
+            self.assertEqual(choices, ["base"])
+            await pilot.press("escape")
+            await pilot.press("down", "e")
+            await pilot.pause()
+            buttons = list(app.screen.query("#extends RadioButton"))
+            self.assertEqual([str(b.label) for b in buttons], ["base", "web"])
+            await pilot.click(buttons[0])
+            await pilot.click("#ok")
+            await pilot.pause()
+        self.assertEqual(edits.rigs["web-ui"]["extends"], "base")
+
+    async def test_setup_04_draft_kept_from_the_editor(self):
+        edits = self.rig.RigEdits(None, ENABLED, [], INSTALLED)
+        app, running = self.running(edits)
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("down", "down", "space", "down", "space", "down", "space")
+            await pilot.pause()
+            app.screen.query_one("#rigs").focus()
+            await pilot.press("down", "s")
+            await pilot.pause()
+            self.assertEqual(app.screen.query_one("#name").value, "n")
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(self.tree_rigs(app), [("base", ""), ("n", "base")])
+        rigs = self.saved()["rigs"]
+        self.assertEqual(rigs["n"], {"extends": "base", "plugins": ["c@n", "d@n"]})
+        self.assertNotIn("o", rigs)
+
+    async def test_editor_05_new_rig_extends_the_selected_rig(self):
+        edits = self.existing()
+        app, running = self.running(edits)
+        async with running as pilot:
+            await pilot.pause()
+            app.screen.query_one("#rigs").focus()
+            await pilot.press("down", "n")
+            await pilot.pause()
+            await pilot.press(*"api", "enter")
+            await pilot.pause()
+            self.assertEqual(self.tree_rigs(app)[-2:], [("api", "web"), ("web-ui", "web")])
+        self.assertEqual(edits.rigs["api"], {"plugins": [], "extends": "web"})
+
+    async def test_editor_10_double_click_opens_a_rig_for_editing(self):
+        edits = self.existing()
+        app, running = self.running(edits)
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.double_click("#rigs", offset=(8, 2))
+            await pilot.pause()
+            name = app.screen.query_one("#name")
+            self.assertEqual(name.value, "web")
+            name.value = "front"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(self.tree_rigs(app), [("base", ""), ("front", "base"), ("web-ui", "front")])
+
+    async def test_editor_10_enter_opens_a_draft_for_saving(self):
+        edits = self.rig.RigEdits(None, ENABLED, [], INSTALLED)
+        edits.toggle("base", "e@o", False)
+        app, running = self.running(edits)
+        async with running as pilot:
+            await pilot.pause()
+            app.screen.query_one("#rigs").focus()
+            await pilot.press("down", "enter")
+            await pilot.pause()
+            self.assertEqual(app.screen.query_one("#name").value, "o")
+            await pilot.press("enter")
+            await pilot.pause()
+        self.assertEqual(self.saved()["rigs"]["o"], {"extends": "base", "plugins": ["e@o"]})
+
+    async def test_editor_06_default_from_keys(self):
+        edits = self.existing()
+        app, running = self.running(edits)
+        async with running as pilot:
+            await pilot.pause()
+            app.screen.query_one("#rigs").focus()
+            await pilot.press("down", "d")
+            await pilot.pause()
+        self.assertEqual(edits.default, "web")
+
+    async def test_editor_07_refusal_shown(self):
+        edits = self.existing()
+        app, running = self.running(edits)
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("x")
+            await pilot.pause()
+            self.assertIn("base", edits.rigs)
+            self.assertTrue(any("base rig" in str(n.message) for n in app._notifications))
+
+    async def test_editor_09_quit_with_unsaved_changes_saves_by_default(self):
+        edits = self.existing()
+        app, running = self.running(edits)
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("space", "q")
+            await pilot.pause()
+            self.assertEqual(type(app.screen).__name__, "SaveOnQuit")
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertEqual(type(app.screen).__name__, "Editor")
+            await pilot.press("q", "enter")
+            await pilot.pause()
+            self.assertFalse(app.is_running)
+        self.assertEqual(self.saved()["rigs"]["base"], {"plugins": ["b@m"]})
+
+    async def test_editor_09_quit_can_discard(self):
+        edits = self.existing()
+        app, running = self.running(edits)
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("space", "q", "d")
+            await pilot.pause()
+            self.assertFalse(app.is_running)
+        self.assertFalse((Path(self._tmp.name) / ".rig" / "rigs.yml").exists())
+
+    async def test_editor_09_quit_without_changes_asks_nothing(self):
+        app, running = self.running(self.existing())
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("q")
+            await pilot.pause()
+            self.assertFalse(app.is_running)
+        self.assertFalse((Path(self._tmp.name) / ".rig" / "rigs.yml").exists())
+
+    async def test_editor_08_save_key(self):
+        app, running = self.running(self.existing())
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("space", "s", "q")
+            await pilot.pause()
+            self.assertFalse(app.is_running)
+        self.assertEqual(self.saved()["rigs"]["base"], {"plugins": ["b@m"]})
 
 
 class CompletionParity(unittest.TestCase):
@@ -709,7 +1095,7 @@ class CompletionParity(unittest.TestCase):
             path = Path(folder) / "rigs.yml"
             for text in (textwrap.dedent(BASIC_RIGS),
                          "default: base\nclones:\n  github.com: ~/src\nrigs:\n  base:\n    plugins:\n    - a@m\n"
-                         "  web-dev:\n    extends:\n    - base\n    plugins: []\n"):
+                         "  web-dev:\n    extends: base\n    plugins: []\n"):
                 path.write_text(text)
                 names = subprocess.run(["awk", self.awk_program("_rig_names"), str(path)],
                                        capture_output=True, text=True).stdout.split()

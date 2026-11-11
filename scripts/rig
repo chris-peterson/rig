@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pyyaml"]
+# dependencies = ["pyyaml", "textual"]
 # ///
 """Launch Claude Code with a named set of plugins (a rig)."""
 
@@ -129,15 +129,22 @@ def load_config() -> dict | None:
             rig = rigs[name] = {}
         if not isinstance(rig, dict):
             fail(f"rig {name} in {path} should be a mapping with plugins and extends.")
-        for key in ("plugins", "extends"):
-            rig[key] = rig.get(key) or []
-            if not isinstance(rig[key], list) or not all(isinstance(v, str) for v in rig[key]):
-                fail(f"rig {name} in {path}: {key} should be a list of names.")
-        for parent in rig["extends"]:
-            if parent not in rigs:
-                fail(f"rig {name} extends {parent}, which {path} doesn't define.")
-        if not isinstance(rig.get("sandbox", False), bool):
-            fail(f"rig {name} in {path}: sandbox should be true or false.")
+        unknown = sorted(set(rig) - {"plugins", "extends"})
+        if unknown:
+            fail(f"rig {name} in {path}: a rig has plugins and extends, not {', '.join(unknown)}.")
+        rig["plugins"] = rig.get("plugins") or []
+        if not isinstance(rig["plugins"], list) or not all(isinstance(v, str) for v in rig["plugins"]):
+            fail(f"rig {name} in {path}: plugins should be a list of names.")
+        parent = rig.get("extends")
+        if parent is not None and not isinstance(parent, str):
+            fail(f"rig {name} in {path} extends more than one rig; a rig extends one, like `extends: base`.")
+        if parent is not None and parent not in rigs:
+            fail(f"rig {name} extends {parent}, which {path} doesn't define.")
+        rig["extends"] = parent
+    roots = [name for name, rig in rigs.items() if rig["extends"] is None]
+    if len(roots) > 1:
+        fail(f"rigs {', '.join(roots)} in {path} extend no other rig, and only the base rig may. "
+             "Make the others extend it.")
     default = data.get("default")
     if default is not None and default not in rigs:
         fail(f"the default rig in {path} is {default}, which isn't defined there.")
@@ -149,16 +156,9 @@ def resolve(name: str, rigs: dict, path: tuple[str, ...] = ()) -> list[str]:
     if name in path:
         cycle = path[path.index(name):] + (name,)
         fail(f"rigs {' → '.join(cycle)} extend each other in a cycle; launch refused.")
-    plugins = []
-    for parent in rigs[name]["extends"]:
-        plugins += resolve(parent, rigs, path + (name,))
-    plugins += rigs[name]["plugins"]
-    return list(dict.fromkeys(plugins))
-
-
-def sandboxed(name: str, rigs: dict) -> bool:
-    """SANDBOX-02: whether the rig, or any rig it extends, turns the sandbox on."""
-    return rigs[name].get("sandbox", False) or any(sandboxed(parent, rigs) for parent in rigs[name]["extends"])
+    parent = rigs[name]["extends"]
+    plugins = resolve(parent, rigs, path + (name,)) if parent else []
+    return list(dict.fromkeys(plugins + rigs[name]["plugins"]))
 
 
 SANDBOX_SETTINGS = {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False}
@@ -234,7 +234,7 @@ def settings_flag(args: list[str]) -> bool:
 
 
 def launch(name: str | None, args: list[str]) -> None:
-    """RIG-04, RIG-05, RIG-06, LAUNCH-01..03, SANDBOX-01..02."""
+    """RIG-04, RIG-05, RIG-06, LAUNCH-01..03, SANDBOX-01."""
     sandbox_flag, args = take_sandbox_flag(args)
     if settings_flag(args):
         fail("rig starts Claude Code with its own --settings, and a second --settings replaces the first. "
@@ -243,9 +243,10 @@ def launch(name: str | None, args: list[str]) -> None:
     if config is None or not config["rigs"]:
         if not interactive(args):
             fail("no rigs are defined, and setup needs a terminal; run `rig setup`.")
-        print("No rigs are defined yet, so rig runs first-run setup before launching.", file=sys.stderr)
         setup()
         config = load_config()
+        if config is None or not config["rigs"]:
+            fail("setup closed without saving any rigs; launch stopped. Run `rig setup` to try again.")
     rigs = config["rigs"]
     if name is None:
         name = config.get("default")
@@ -260,14 +261,12 @@ def launch(name: str | None, args: list[str]) -> None:
     loaded = [pin for pin, load in chosen if load]
     replaced = {pin["plugin"] for pin in loaded}
     enabled = [p for p in plugins if p.split("@")[0] not in replaced]
-    extends = rigs[name]["extends"]
-    lineage = f" (extends {', '.join(extends)})" if extends else ""
+    lineage = f" (extends {rigs[name]['extends']})" if rigs[name]["extends"] else ""
     count = f"{len(plugins)} plugin{'' if len(plugins) == 1 else 's'}"
-    sandbox = sandbox_flag or sandboxed(name, rigs)
-    print(f"rig: {name}{lineage}, {count}", *describe_pins(chosen), f"sandbox: {'on' if sandbox else 'off'}",
+    print(f"rig: {name}{lineage}, {count}", *describe_pins(chosen), f"sandbox: {'on' if sandbox_flag else 'off'}",
           sep="\n", file=sys.stderr)
     plugin_dirs = [arg for pin in loaded for arg in ("--plugin-dir", pin["path"])]
-    settings = overlay(enabled, known_plugin_ids(cwd), sandbox)
+    settings = overlay(enabled, known_plugin_ids(cwd), sandbox_flag)
     exec_claude(["--settings", json.dumps(settings), *plugin_dirs, *args])
 
 
@@ -288,10 +287,8 @@ def cmd_list(args: list[str]) -> int:
     for name, rig in config["rigs"].items():
         print(f"{name}{' (default)' if name == config.get('default') else ''}")
         if rig["extends"]:
-            print(f"  extends: {', '.join(rig['extends'])}")
+            print(f"  extends: {rig['extends']}")
         print(f"  plugins: {', '.join(rig['plugins']) or 'none'}")
-        if rig.get("sandbox"):
-            print("  sandbox: on")
     return 0
 
 
@@ -552,124 +549,506 @@ def enabled_groups() -> list[list[str]]:
     return groups + ([current] if current else [])
 
 
-def parse_selection(answer: str, count: int) -> list[int] | None:
-    """`1 3 5-7` as zero-based indexes, or None when the answer isn't a selection."""
-    picked = []
-    for token in answer.replace(",", " ").split():
-        match = re.fullmatch(r"(\d+)(?:-(\d+))?", token)
-        if not match:
-            return None
-        low, high = int(match.group(1)), int(match.group(2) or match.group(1))
-        if not 1 <= low <= high <= count:
-            return None
-        picked += range(low - 1, high)
-    return list(dict.fromkeys(picked))
-
-
-def pick(plugins: list[str], prompt: str, preselected: list[str]) -> list[str]:
-    """Number the plugins, marking the preselected ones, and read a selection; blank keeps the marks."""
-    for number, plugin_id in enumerate(plugins, 1):
-        mark = "*" if plugin_id in preselected else " "
-        print(f"  {mark}{number:>3}  {plugin_id}", file=sys.stderr)
-    while True:
-        answer = ask(prompt)
-        if not answer:
-            return [p for p in plugins if p in preselected]
-        indexes = parse_selection(answer, len(plugins))
-        if indexes is not None:
-            return [plugins[i] for i in indexes]
-        print(f"  Enter numbers or ranges between 1 and {len(plugins)}, like: 1 3 5-7", file=sys.stderr)
-
-
 RIG_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
-class SetupStopped(Exception):
-    """The user answered q to stop setup."""
-
-
-def ask_rig_name(prompt: str, taken: set[str], suggested: str | None = None) -> str | None:
-    """A new rig's name; None to skip this rig. Raises SetupStopped when the user stops."""
-    while True:
-        answer = ask(prompt) or (suggested or "")
-        if answer == "q":
-            raise SetupStopped
-        if answer in ("", "-"):
-            return None
-        if not RIG_NAME.fullmatch(answer):
-            print("  A rig name is letters, digits, '.', '_', or '-'.", file=sys.stderr)
-        elif answer in taken:
-            print(f"  There's already a rig named {answer}.", file=sys.stderr)
-        else:
-            return answer
-
-
-def suggestions(outside: list[str]) -> list[tuple[str | None, list[str]]]:
-    """SETUP-04a/b: (suggested name, plugins) for each group of plugins outside the base rig."""
-    groups = enabled_groups()
+def suggestions(outside: list[str], groups: list[list[str]]) -> list[tuple[str | None, list[str]]]:
+    """SETUP-04a/b: (suggested name, plugins) for each group of plugins outside every rig."""
     if len(groups) > 1:
         return [(None, kept) for group in groups if (kept := [p for p in group if p in outside])]
     by_market: dict[str, list[str]] = {}
     for plugin_id in outside:
         by_market.setdefault(plugin_id.partition("@")[2] or plugin_id, []).append(plugin_id)
-    return list(by_market.items())
+    return sorted(by_market.items(), key=lambda item: item[0].casefold())
+
+
+class Refused(Exception):
+    """An edit the rig editor won't make; the message says why."""
+
+
+class RigEdits:
+    """The rig definitions as the rig editor changes them, apart from the screen that shows them."""
+
+    def __init__(self, config: dict | None, enabled: list[str], groups: list[list[str]], installed: list[str]):
+        self.first_run = config is None or not config["rigs"]
+        config = config or {"default": None, "clones": {}, "rigs": {}}
+        self.clones = config.get("clones") or {}
+        self.rigs = {name: {"plugins": list(rig["plugins"]), "extends": rig["extends"]}
+                     for name, rig in config["rigs"].items()}
+        self.default = config.get("default")
+        if self.first_run:
+            self.rigs = {"base": {"plugins": list(enabled), "extends": None}}
+            self.default = "base"
+        self.enabled = enabled
+        self.groups = groups
+        named = {p for rig in self.rigs.values() for p in rig["plugins"]}
+        self.candidates = sorted(set(installed) | set(enabled) | named,
+                                 key=lambda p: (p.partition("@")[2], p.partition("@")[0]))
+        self.dirty = self.first_run
+
+    @property
+    def base(self) -> str | None:
+        """The one rig that extends no other."""
+        return next((name for name, rig in self.rigs.items() if rig["extends"] is None), None)
+
+    def lineage(self, name: str) -> list[str]:
+        """The rigs the named rig extends, nearest first, stopping short of a cycle."""
+        chain: list[str] = []
+        parent = self.rigs[name]["extends"]
+        while parent in self.rigs and parent not in chain and parent != name:
+            chain.append(parent)
+            parent = self.rigs[parent]["extends"]
+        return chain
+
+    def children(self, name: str) -> list[str]:
+        """EDITOR-12: the rigs that extend the named rig, in alphabetical order."""
+        return sorted((other for other, rig in self.rigs.items() if rig["extends"] == name), key=str.casefold)
+
+    def inherited(self, name: str) -> dict[str, str]:
+        """EDITOR-04: each plugin the rig gets from the rigs it extends, with the rig that names it."""
+        sources: dict[str, str] = {}
+        for rig in reversed(self.lineage(name)):
+            for plugin_id in self.rigs[rig]["plugins"]:
+                sources.setdefault(plugin_id, rig)
+        return sources
+
+    def loads(self, name: str) -> set[str]:
+        return set(self.inherited(name)) | set(self.rigs[name]["plugins"])
+
+    def drafts(self) -> list[tuple[str | None, list[str]]]:
+        """SETUP-04: (suggested name, plugins) for each group of enabled plugins that no rig loads."""
+        covered = {p for name in self.rigs for p in self.loads(name)}
+        return suggestions([p for p in self.enabled if p not in covered], self.groups)
+
+    def parent_choices(self, name: str | None) -> list[str]:
+        """EDITOR-05: the rigs this one can extend without forming a cycle."""
+        if name is None:
+            return list(self.rigs)
+        return [other for other in self.rigs if other != name and name not in self.lineage(other)]
+
+    def check_name(self, name: str) -> None:
+        if not RIG_NAME.fullmatch(name):
+            raise Refused("A rig name is letters, digits, '.', '_', or '-', starting with a letter or digit.")
+        if name in self.rigs:
+            raise Refused(f"There's already a rig named {name}.")
+
+    def toggle(self, name: str, plugin_id: str, on: bool) -> None:
+        plugins = self.rigs[name]["plugins"]
+        if on and plugin_id not in plugins:
+            plugins.append(plugin_id)
+            plugins.sort(key=str.casefold)
+        elif not on and plugin_id in plugins:
+            plugins.remove(plugin_id)
+        self.dirty = True
+
+    def create(self, name: str, extends: str, plugins: list[str] | None = None) -> None:
+        self.check_name(name)
+        if extends not in self.rigs:
+            raise Refused("A new rig extends one rig; choose which.")
+        self.rigs[name] = {"plugins": list(plugins or []), "extends": extends}
+        self.dirty = True
+
+    def keep_draft(self, index: int, name: str, extends: str) -> None:
+        """SETUP-04: a draft becomes a rig once the user names it."""
+        _, plugins = self.drafts()[index]
+        self.create(name, extends, plugins)
+
+    def set_extends(self, name: str, extends: str) -> None:
+        if name == self.base:
+            raise Refused(f"{name} is the base rig, which extends no other rig.")
+        if extends not in self.parent_choices(name):
+            raise Refused(f"{name} can't extend {extends}: {extends} extends {name}, which would form a cycle.")
+        self.rigs[name]["extends"] = extends
+        self.dirty = True
+
+    def rename(self, name: str, new: str) -> None:
+        """EDITOR-11: the rig takes the new name, as do the references to it."""
+        if new == name:
+            return
+        self.check_name(new)
+        self.rigs = {(new if rig == name else rig): definition for rig, definition in self.rigs.items()}
+        for definition in self.rigs.values():
+            if definition["extends"] == name:
+                definition["extends"] = new
+        if self.default == name:
+            self.default = new
+        self.dirty = True
+
+    def edit(self, name: str, new: str, extends: str | None) -> None:
+        """EDITOR-10: rename the rig and change the rig it extends, making neither change if either is refused."""
+        if new != name:
+            self.check_name(new)
+        if extends != self.rigs[name]["extends"]:
+            self.set_extends(name, extends)
+        self.rename(name, new)
+
+    def make_default(self, name: str) -> None:
+        """EDITOR-06."""
+        self.default = name
+        self.dirty = True
+
+    def delete(self, name: str) -> None:
+        """EDITOR-07."""
+        if name == self.base:
+            raise Refused(f"{name} is the base rig, which every other rig extends.")
+        children = self.children(name)
+        if children:
+            raise Refused(f"{name} can't be deleted while {', '.join(children)} "
+                          f"{'extends' if len(children) == 1 else 'extend'} it.")
+        if name == self.default:
+            raise Refused(f"{name} is the default rig; mark another rig as the default first.")
+        del self.rigs[name]
+        self.dirty = True
+
+    def save(self) -> None:
+        """EDITOR-08, SETUP-03: the base rig first, then the rest, each rig's plugins in alphabetical order."""
+        order = sorted(self.rigs, key=lambda name: (name != self.base, name.casefold()))
+        rigs = {name: {**self.rigs[name], "plugins": sorted(self.rigs[name]["plugins"], key=str.casefold)}
+                for name in order}
+        save_config({"default": self.default, "clones": self.clones, "rigs": rigs})
+        self.dirty = False
+
+
+def open_edits() -> RigEdits:
+    return RigEdits(load_config(), enabled_plugins(), enabled_groups(), list(installed_plugins()))
+
+
+def editor_app(edits: RigEdits):
+    """EDITOR-01..09: the rig editor as a Textual app over the edits."""
+    from rich.text import Text
+    from textual.app import App, ComposeResult
+    from textual.binding import Binding
+    from textual.containers import Horizontal, Vertical
+    from textual.screen import ModalScreen, Screen
+    from textual.widgets import Button, Footer, Input, Label, RadioButton, RadioSet, SelectionList, Static, Tree
+    from textual.widgets.selection_list import Selection
+
+    class RigDialog(ModalScreen):
+        """A rig's name and, unless choices is None, the one rig it extends; dismisses with (name, extends)
+        or None. `renaming` is the rig's current name, which the new name may keep."""
+
+        BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+        def __init__(self, title: str, name: str | None, choices: list[str] | None, extends: str | None,
+                     renaming: str | None = None):
+            super().__init__()
+            self.heading, self.suggested, self.renaming = title, name, renaming
+            self.choices, self.extends = choices, extends
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="dialog"):
+                yield Label(self.heading, id="dialog-title")
+                yield Input(value=self.suggested or "", placeholder="rig name", id="name")
+                if self.choices is None:
+                    yield Label("The base rig extends no other rig.")
+                else:
+                    yield Label("Extends:")
+                    with RadioSet(id="extends"):
+                        for choice in self.choices:
+                            yield RadioButton(Text(choice), value=choice == self.extends)
+                yield Static("", id="dialog-error")
+                with Horizontal(id="dialog-buttons"):
+                    yield Button("OK", variant="primary", id="ok")
+                    yield Button("Cancel", id="cancel")
+
+        def on_input_submitted(self) -> None:
+            self.submit()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "ok":
+                self.submit()
+            else:
+                self.dismiss(None)
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
+
+        def submit(self) -> None:
+            name = self.query_one("#name", Input).value.strip()
+            error = self.query_one("#dialog-error", Static)
+            extends = None
+            if self.choices is not None:
+                index = self.query_one("#extends", RadioSet).pressed_index
+                if index < 0:
+                    error.update("Choose the rig it extends.")
+                    return
+                extends = self.choices[index]
+            if name != self.renaming:
+                try:
+                    edits.check_name(name)
+                except Refused as refused:
+                    error.update(str(refused))
+                    return
+            self.dismiss((name, extends))
+
+    class SaveOnQuit(ModalScreen):
+        """EDITOR-09: dismisses with "save", "discard", or None to go back to editing."""
+
+        BINDINGS = [Binding("s", "answer('save')", "Save"), Binding("d", "answer('discard')", "Discard"),
+                    Binding("escape", "answer(None)", "Back")]
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="dialog"):
+                yield Label("Save the changes before quitting?", id="dialog-title")
+                with Horizontal(id="dialog-buttons"):
+                    yield Button("Save (s)", variant="primary", id="save")
+                    yield Button("Discard (d)", variant="error", id="discard")
+
+        def on_mount(self) -> None:
+            self.query_one("#save", Button).focus()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            self.dismiss(event.button.id)
+
+        def action_answer(self, choice: str | None) -> None:
+            self.dismiss(choice)
+
+    class RigTree(Tree):
+        """The rigs pane: a click selects a rig, and enter or a double-click opens it for editing."""
+
+        BINDINGS = [Binding("enter", "edit", "Edit", show=False)]
+
+        def on_mount(self) -> None:
+            self.auto_expand = False
+
+        def action_edit(self) -> None:
+            self.screen.action_edit()
+
+    class Editor(Screen):
+        BINDINGS = [
+            Binding("n", "new_rig", "New rig"),
+            Binding("e", "edit", "Edit"),
+            Binding("d", "make_default", "Default"),
+            Binding("x,delete", "delete", "Delete"),
+            Binding("s", "save", "Save"),
+            Binding("ctrl+s", "save", "Save", show=False),
+            Binding("q,escape", "leave", "Quit"),
+        ]
+
+        def __init__(self):
+            super().__init__()
+            self.current: tuple[str, str | int] = ("rig", edits.default or edits.base or "")
+
+        def compose(self) -> ComposeResult:
+            if edits.first_run:
+                yield Static("First-run setup: choose the base rig's plugins, keep any drafts as rigs, "
+                             "then s to save and q to finish.", id="hint")
+            with Horizontal():
+                tree = RigTree("rigs", id="rigs")
+                tree.show_root = False
+                tree.border_title = "rigs"
+                yield tree
+                yield SelectionList(id="plugins")
+            yield Footer()
+
+        def on_mount(self) -> None:
+            self.rebuild()
+            self.query_one("#plugins", SelectionList).focus()
+
+        def rig_label(self, name: str) -> Text:
+            label = Text("★ " if name == edits.default else "  ")
+            label.append(name, style="bold" if name == edits.default else "")
+            return label
+
+        def rebuild(self) -> None:
+            """Redraw both panes from the edits, keeping the cursor on the current rig."""
+            tree = self.query_one("#rigs", Tree)
+            tree.clear()
+            placed: set[str] = set()
+
+            def place(node, name: str) -> None:
+                placed.add(name)
+                kids = [kid for kid in edits.children(name) if kid not in placed]
+                drafts = edits.drafts() if name == edits.base else []
+                child = node.add(self.rig_label(name), data=("rig", name), expand=True,
+                                 allow_expand=bool(kids or drafts))
+                for kid in kids:
+                    place(child, kid)
+                for index, (suggested, plugins) in enumerate(drafts):
+                    label = Text(f"  draft: {suggested or 'unnamed'} ({len(plugins)})", style="dim italic")
+                    child.add_leaf(label, data=("draft", index))
+
+            if edits.base:
+                place(tree.root, edits.base)
+            for name in sorted((n for n in edits.rigs if n not in placed), key=str.casefold):
+                place(tree.root, name)
+            if self.current[0] == "draft" and self.current[1] >= len(edits.drafts()):
+                self.current = ("rig", edits.default or edits.base or "")
+            self.call_after_refresh(self.restore_cursor)
+            self.show_plugins()
+
+        def restore_cursor(self) -> None:
+            tree = self.query_one("#rigs", Tree)
+            stack = list(tree.root.children)
+            while stack:
+                node = stack.pop(0)
+                if node.data == self.current:
+                    tree.move_cursor(node)
+                    return
+                stack[:0] = list(node.children)
+
+        def show_plugins(self) -> None:
+            listing = self.query_one("#plugins", SelectionList)
+            highlighted = listing.highlighted
+            listing.clear_options()
+            kind, key = self.current
+            if kind == "draft":
+                suggested, plugins = edits.drafts()[key]
+                listing.border_title = f"draft: {suggested or 'unnamed'} (s saves it as a rig)"
+                listing.add_options([Selection(p, p, True, disabled=True) for p in plugins])
+                return
+            if key not in edits.rigs:
+                listing.border_title = "no rigs: n makes one"
+                return
+            rig = edits.rigs[key]
+            inherited = edits.inherited(key)
+            listing.border_title = f"{key}: extends {rig['extends']}" if rig["extends"] else f"{key}: the base rig"
+            options = [Selection(Text.assemble(p, (f"  from {inherited[p]}", "dim")), p, True, disabled=True)
+                       for p in edits.candidates if p in inherited]
+            options += [Selection(p, p, p in rig["plugins"]) for p in edits.candidates if p not in inherited]
+            listing.add_options(options)
+            if options:
+                listing.highlighted = min(highlighted or 0, len(options) - 1)
+
+        def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
+            if event.node.data and event.node.data != self.current:
+                self.current = event.node.data
+                self.show_plugins()
+
+        def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
+            kind, key = self.current
+            if kind != "rig" or event.selection_list.id != "plugins":
+                return
+            plugin_id = event.selection.value
+            edits.toggle(key, plugin_id, plugin_id in event.selection_list.selected)
+            self.rebuild()
+
+        def selected_rig(self) -> str | None:
+            kind, key = self.current
+            if kind != "rig" or key not in edits.rigs:
+                self.notify("Select a rig first.", severity="warning")
+                return None
+            return key
+
+        def attempt(self, change, then: str | None = None) -> None:
+            """Make the change, or show why it was refused; `then` is the rig to select after."""
+            try:
+                change()
+            except Refused as refused:
+                self.notify(str(refused), severity="error")
+                return
+            if then:
+                self.current = ("rig", then)
+            self.rebuild()
+
+        def action_new_rig(self) -> None:
+            def made(answer) -> None:
+                if answer:
+                    self.attempt(lambda: edits.create(*answer), then=answer[0])
+
+            self.app.push_screen(RigDialog("New rig", None, edits.parent_choices(None),
+                                           self.extends_default()), made)
+
+        def extends_default(self) -> str | None:
+            kind, key = self.current
+            return key if kind == "rig" and key in edits.rigs else edits.base
+
+        def save_draft(self, index: int) -> None:
+            """SETUP-04: name the draft, then save it with the rest of the edits."""
+            suggested, _ = edits.drafts()[index]
+
+            def kept(answer) -> None:
+                if answer:
+                    self.attempt(lambda: edits.keep_draft(index, *answer), then=answer[0])
+                    if answer[0] in edits.rigs:
+                        self.save()
+
+            self.app.push_screen(RigDialog("Save draft as a rig", suggested, edits.parent_choices(None),
+                                           edits.base), kept)
+
+        def action_edit(self) -> None:
+            """EDITOR-10: a draft opens for saving as a rig, a rig for its name and the rig it extends."""
+            kind, key = self.current
+            if kind == "draft":
+                self.save_draft(key)
+                return
+            if key not in edits.rigs:
+                return
+
+            def edited(answer) -> None:
+                if answer:
+                    self.attempt(lambda: edits.edit(key, *answer), then=answer[0])
+
+            choices = None if key == edits.base else edits.parent_choices(key)
+            self.app.push_screen(RigDialog(f"Edit {key}", key, choices, edits.rigs[key]["extends"], key), edited)
+
+        def on_click(self, event) -> None:
+            if event.chain == 2 and isinstance(event.widget, RigTree):
+                self.action_edit()
+
+        def action_make_default(self) -> None:
+            if (name := self.selected_rig()) is not None:
+                self.attempt(lambda: edits.make_default(name))
+
+        def action_delete(self) -> None:
+            if (name := self.selected_rig()) is not None:
+                self.attempt(lambda: edits.delete(name), then=edits.rigs[name]["extends"])
+
+        def action_save(self) -> None:
+            kind, key = self.current
+            if kind == "draft":
+                self.save_draft(key)
+            else:
+                self.save()
+
+        def save(self) -> None:
+            edits.save()
+            self.notify(f"Saved to {display(rigs_file())}")
+
+        def action_leave(self) -> None:
+            if not edits.dirty:
+                self.app.exit()
+                return
+            def chosen(choice: str | None) -> None:
+                if choice == "save":
+                    edits.save()
+                if choice:
+                    self.app.exit()
+
+            self.app.push_screen(SaveOnQuit(), chosen)
+
+    class RigEditor(App):
+        TITLE = "rig setup"
+        CSS = """
+        #hint { padding: 0 1; background: $boost; }
+        #rigs { width: 40; height: 1fr; border: round $primary; }
+        #plugins { width: 1fr; height: 1fr; border: round $primary; }
+        #rigs:focus-within, #plugins:focus { border: round $accent; }
+        RigDialog, SaveOnQuit { align: center middle; }
+        #dialog { width: 60; height: auto; max-height: 80%; border: thick $primary; background: $surface; padding: 1 2; }
+        #dialog-title { text-style: bold; margin-bottom: 1; }
+        #dialog-error { color: $error; }
+        #dialog #extends { height: auto; max-height: 12; width: 1fr; }
+        #dialog-buttons { height: auto; margin-top: 1; }
+        #dialog-buttons Button { margin-right: 2; }
+        """
+
+        def on_mount(self) -> None:
+            self.push_screen(Editor())
+
+    return RigEditor()
 
 
 def setup() -> None:
-    """SETUP-02..05."""
-    enabled = enabled_plugins()
-    if not enabled:
-        fail(f"{user_settings_file()} enables no plugins, so there's nothing to build rigs from.")
-    config = load_config() or {"default": None, "clones": {}, "rigs": {}}
-    rigs = config["rigs"]
-    base = config.get("default") or "base"
-    current = rigs.get(base, {}).get("plugins") or enabled
-    print(f"Claude Code's settings enable these plugins. Which form the base rig, {base}, "
-          "loaded in every session? (* = current choice)", file=sys.stderr)
-    chosen = pick(enabled, "Base rig plugins (blank keeps the marked ones): ", current)
-    rigs[base] = {**rigs.get(base, {}), "plugins": chosen, "extends": rigs.get(base, {}).get("extends", [])}
-    config.update(default=base, rigs=rigs)
-    save_config(config)
-    print(f"Saved {base} as the default rig ({len(chosen)} plugins).", file=sys.stderr)
-
-    def uncovered() -> list[str]:
-        covered = {p for name in rigs for p in resolve(name, rigs)}
-        return [p for p in enabled if p not in covered]
-
-    try:
-        for suggested, group in suggestions(uncovered()):
-            group = [p for p in group if p in uncovered()]
-            if not group:
-                continue
-            print(f"\nSuggested rig, extending {base}: {', '.join(group)}", file=sys.stderr)
-            hint = f" [{suggested}]" if suggested else ""
-            name = ask_rig_name(f"Name it{hint} (- to skip, q to stop): ", set(rigs), suggested)
-            if name:
-                add_rig(config, name, base, group)
-        while remaining := uncovered():
-            print("\nThese enabled plugins aren't in any rig yet:", file=sys.stderr)
-            group = pick(remaining, "Plugins for another rig (blank to finish): ", [])
-            if not group:
-                break
-            name = ask_rig_name("Name it (q to stop): ", set(rigs))
-            if name:
-                add_rig(config, name, base, group)
-    except SetupStopped:
-        pass
-    print(f"Rigs are in {rigs_file()}. `rig list` shows them.", file=sys.stderr)
-
-
-def add_rig(config: dict, name: str, base: str, plugins: list[str]) -> None:
-    config["rigs"][name] = {"extends": [base], "plugins": plugins}
-    save_config(config)
-    print(f"Saved rig {name}.", file=sys.stderr)
+    """SETUP-01..05: open the rig editor on the rig definitions, or on a new base rig."""
+    editor_app(open_edits()).run()
 
 
 def save_config(config: dict) -> None:
     data = {"default": config["default"]}
     if config.get("clones"):
         data["clones"] = config["clones"]
-    data["rigs"] = {name: {k: v for k, v in rig.items() if v not in ([], None)}
+    data["rigs"] = {name: {k: v for k, v in rig.items() if v not in ([], None, False)}
                     for name, rig in config["rigs"].items()}
     write_yaml(rigs_file(), data)
 
@@ -678,8 +1057,8 @@ def cmd_setup(args: list[str]) -> int:
     """SETUP-05."""
     if args:
         fail("setup takes no arguments.")
-    if not (sys.stdin.isatty() and sys.stderr.isatty()):
-        fail("setup asks questions, so it needs a terminal.")
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        fail("setup opens the rig editor, so it needs a terminal.")
     setup()
     return 0
 
@@ -897,7 +1276,7 @@ _rig() {
   local -a commands=(
     'use:Launch Claude Code with a named rig'
     'list:List the rigs with their plugins'
-    'setup:Choose the base rig and named rigs from the plugins your settings enable'
+    'setup:Edit the rigs in a full-screen editor'
     'pin:Use a local plugin checkout in place of the installed copy; bare pin lists the pins'
     'unpin:Stop using a pinned checkout'
     'install-cli:Put rig on PATH with completions; --claude makes claude run rig'
@@ -970,8 +1349,8 @@ USAGE = f"""usage: rig [<claude args>...]           launch Claude Code with the 
 Commands:
   use <rig> [<claude args>]  launch Claude Code with the named rig
   list                       list the rigs with their plugins
-  setup                      choose the base rig and named rigs from the plugins
-                             your Claude Code settings enable
+  setup                      edit the rigs in a full-screen editor: their plugins, the
+                             rig each extends, and the default
   pin [<path|name>...]       use a local plugin checkout in place of the installed copy;
                              with no arguments, list the pins
   unpin <path|name>...       stop using a pinned checkout

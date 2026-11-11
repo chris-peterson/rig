@@ -50,7 +50,7 @@ docs:
 # run the test suite, including the completion parity check
 [group('check your work')]
 test:
-    uv run --quiet --with pyyaml python -m unittest discover -s tests
+    uv run --quiet --with pyyaml --with textual python -m unittest discover -s tests
 
 # run claude plugin validate with plugin.yml's acceptances, as the projection job does
 [group('check your work')]

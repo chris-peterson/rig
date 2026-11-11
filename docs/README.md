@@ -6,8 +6,7 @@ chosen for a kind of work; rig launches Claude Code with the one you name.
 While you're developing a plugin, pin its local checkout and it stands in for
 the installed copy in every rig that uses the plugin, so your edits take effect
 without a marketplace release. When you want
-Bash commands confined, turn on the sandbox for a launch, or have a rig ask for
-it.
+Bash commands confined, turn on the sandbox for a launch.
 
 [Using rig](/usage) covers installing it, rigs, pins, and the sandbox. The
 [spec](/spec) lists what it does, requirement by requirement.
