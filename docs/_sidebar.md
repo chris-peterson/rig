@@ -1,3 +1,4 @@
 - [Home](/)
+- [Using rig](/usage)
 - Reference
   - [SPEC](/spec)

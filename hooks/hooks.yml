@@ -1,0 +1,5 @@
+# Source of record for rig's hooks; shipyard generates hooks.json.
+hooks:
+  - event: SessionStart
+    command: 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/cli-freshness.sh"'
+    description: Tells you to run /rig:install-rig when the rig command on PATH runs an outdated install.

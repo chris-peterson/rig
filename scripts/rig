@@ -1,0 +1,1024 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml"]
+# ///
+"""Launch Claude Code with a named set of plugins (a rig)."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+PROG = "rig"
+PKG_ROOT = Path(__file__).resolve().parent.parent
+PLUGIN_ROOT = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or PKG_ROOT)
+INSTALL_COMMAND = "/rig:install-rig"
+
+
+def rig_home() -> Path:
+    return Path.home() / ".rig"
+
+
+def fail(message: str) -> None:
+    sys.exit(f"{PROG}: {message}")
+
+
+def plugin_version() -> str:
+    return json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text())["version"]
+
+
+def git_read(*args: str) -> str:
+    result = subprocess.run(["git", "-C", str(PKG_ROOT), *args], capture_output=True, text=True,
+                            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def version_display() -> str:
+    """The manifest version, marked as a prerelease when this copy is a git checkout."""
+    version = plugin_version()
+    if not (PKG_ROOT / ".git").exists():
+        return version
+    sha = git_read("rev-parse", "--short=7", "HEAD")
+    if not sha:
+        return f"{version}-dev"
+    dirty = ".dirty" if git_read("status", "--porcelain") else ""
+    return f"{version}-dev.g{sha}{dirty}"
+
+
+def claude_subcommands() -> set[str]:
+    """The subcommand names `claude --help` lists, aliases included (`plugin|plugins`)."""
+    result = subprocess.run(["claude", "--help"], capture_output=True, text=True)
+    if result.returncode != 0:
+        fail(f"`claude --help` failed ({result.returncode}): {result.stderr.strip()}")
+    names, listing = set(), False
+    for line in result.stdout.splitlines():
+        if line.startswith("Commands:"):
+            listing = True
+            continue
+        match = listing and re.match(r"^  ([a-z][a-z|-]*)(?: |$)", line)
+        if match:
+            names.update(match.group(1).split("|"))
+    return names
+
+
+def exec_claude(args: list[str]) -> None:
+    try:
+        os.execvp("claude", ["claude", *args])
+    except FileNotFoundError:
+        fail("claude is not on PATH.")
+
+
+def interactive(args: list[str]) -> bool:
+    """A person at a terminal starting a session they will type into."""
+    return sys.stdin.isatty() and sys.stderr.isatty() and not {"-p", "--print"} & set(args)
+
+
+def ask(question: str) -> str:
+    sys.stderr.write(question)
+    sys.stderr.flush()
+    return sys.stdin.readline().strip()
+
+
+def confirmed(question: str) -> bool:
+    return ask(f"{question} [y/N] ").lower() in ("y", "yes")
+
+
+def yaml_module():
+    try:
+        import yaml
+    except ImportError:
+        fail("PyYAML is missing. Run rig through uv (`uv run --script`), as the installed wrapper does.")
+    return yaml
+
+
+def read_yaml(path: Path):
+    yaml = yaml_module()
+    try:
+        return yaml.safe_load(path.read_text())
+    except yaml.YAMLError as error:
+        fail(f"{path} is not valid YAML: {error}")
+
+
+def write_yaml(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml_module().safe_dump(data, sort_keys=False, default_flow_style=False))
+
+
+def rigs_file() -> Path:
+    return rig_home() / "rigs.yml"
+
+
+def load_config() -> dict | None:
+    """rigs.yml as {default, clones, rigs}, checked for shape; None when there is no file."""
+    path = rigs_file()
+    if not path.exists():
+        return None
+    data = read_yaml(path) or {}
+    if not isinstance(data, dict):
+        fail(f"{path} should hold a mapping with default, clones, and rigs.")
+    rigs = data.setdefault("rigs", {}) or {}
+    data["rigs"] = rigs
+    data["clones"] = data.get("clones") or {}
+    for name, rig in rigs.items():
+        if rig is None:
+            rig = rigs[name] = {}
+        if not isinstance(rig, dict):
+            fail(f"rig {name} in {path} should be a mapping with plugins and extends.")
+        for key in ("plugins", "extends"):
+            rig[key] = rig.get(key) or []
+            if not isinstance(rig[key], list) or not all(isinstance(v, str) for v in rig[key]):
+                fail(f"rig {name} in {path}: {key} should be a list of names.")
+        for parent in rig["extends"]:
+            if parent not in rigs:
+                fail(f"rig {name} extends {parent}, which {path} doesn't define.")
+        if not isinstance(rig.get("sandbox", False), bool):
+            fail(f"rig {name} in {path}: sandbox should be true or false.")
+    default = data.get("default")
+    if default is not None and default not in rigs:
+        fail(f"the default rig in {path} is {default}, which isn't defined there.")
+    return data
+
+
+def resolve(name: str, rigs: dict, path: tuple[str, ...] = ()) -> list[str]:
+    """RIG-02, RIG-03: the plugins a rig loads, its own after those of the rigs it extends, without repeats."""
+    if name in path:
+        cycle = path[path.index(name):] + (name,)
+        fail(f"rigs {' → '.join(cycle)} extend each other in a cycle; launch refused.")
+    plugins = []
+    for parent in rigs[name]["extends"]:
+        plugins += resolve(parent, rigs, path + (name,))
+    plugins += rigs[name]["plugins"]
+    return list(dict.fromkeys(plugins))
+
+
+def sandboxed(name: str, rigs: dict) -> bool:
+    """SANDBOX-02: whether the rig, or any rig it extends, turns the sandbox on."""
+    return rigs[name].get("sandbox", False) or any(sandboxed(parent, rigs) for parent in rigs[name]["extends"])
+
+
+SANDBOX_SETTINGS = {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False}
+
+
+def take_sandbox_flag(args: list[str]) -> tuple[bool, list[str]]:
+    """SANDBOX-01: whether --sandbox appears before any `--`, and the arguments without it."""
+    end = args.index("--") if "--" in args else len(args)
+    head = [a for a in args[:end] if a != "--sandbox"]
+    return len(head) < end, head + args[end:]
+
+
+def settings_files(cwd: Path) -> list[Path]:
+    """Claude Code settings files that can enable plugins for a session in cwd."""
+    files = [Path.home() / ".claude" / "settings.json"]
+    for folder in (cwd, *cwd.parents):
+        files += [folder / ".claude" / "settings.json", folder / ".claude" / "settings.local.json"]
+    return list(dict.fromkeys(f for f in files if f.is_file()))
+
+
+def installed_plugins() -> dict:
+    path = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
+    return json.loads(path.read_text()).get("plugins", {}) if path.exists() else {}
+
+
+def installed_for(cwd: Path) -> set[str]:
+    """Plugin ids installed at user scope, or at a project scope that covers cwd."""
+    ids = set()
+    for plugin_id, entries in installed_plugins().items():
+        for entry in entries:
+            project = entry.get("projectPath")
+            if entry.get("scope") == "user" or (project and cwd.is_relative_to(Path(project).resolve())):
+                ids.add(plugin_id)
+    return ids
+
+
+def known_plugin_ids(cwd: Path) -> set[str]:
+    """Every plugin id a session in cwd could load: each one installed, and each one any settings file names."""
+    ids = set(installed_plugins())
+    for path in settings_files(cwd):
+        try:
+            ids.update((json.loads(path.read_text()).get("enabledPlugins") or {}).keys())
+        except json.JSONDecodeError as error:
+            fail(f"{path} is not valid JSON: {error}")
+    return ids
+
+
+def overlay(rig_ids: list[str], known: set[str], sandbox: bool) -> dict:
+    """RIG-04, SANDBOX-01: settings that enable the rig's plugins, turn every other plugin off,
+    and turn on the sandbox with no unsandboxed commands when asked."""
+    enabled = {plugin_id: False for plugin_id in sorted(known)}
+    enabled.update({plugin_id: True for plugin_id in rig_ids})
+    return {"enabledPlugins": enabled, **({"sandbox": SANDBOX_SETTINGS} if sandbox else {})}
+
+
+def install_missing(name: str, plugins: list[str], cwd: Path, args: list[str]) -> None:
+    """RIG-10, RIG-11: install a rig's missing plugins once the user agrees, or refuse the launch."""
+    missing = [p for p in plugins if p not in installed_for(cwd)]
+    if not missing:
+        return
+    if not interactive(args):
+        fail(f"rig {name} names plugins that aren't installed: {', '.join(missing)}. "
+             "Install them with `claude plugin install <plugin>`, or launch at a terminal to be asked.")
+    for plugin in missing:
+        if not confirmed(f"rig {name} names {plugin}, which isn't installed. Install it?"):
+            fail(f"launch refused: {plugin} isn't installed.")
+        if subprocess.run(["claude", "plugin", "install", plugin]).returncode != 0:
+            fail(f"`claude plugin install {plugin}` failed; launch refused.")
+
+
+def settings_flag(args: list[str]) -> bool:
+    return any(a == "--settings" or a.startswith("--settings=") for a in args)
+
+
+def launch(name: str | None, args: list[str]) -> None:
+    """RIG-04, RIG-05, RIG-07, LAUNCH-01..03, SANDBOX-01..02."""
+    sandbox_flag, args = take_sandbox_flag(args)
+    if settings_flag(args):
+        fail("rig starts Claude Code with its own --settings, and a second --settings replaces the first. "
+             "Put these settings in ~/.claude/settings.json or the project's .claude/settings.json.")
+    config = load_config()
+    if config is None or not config["rigs"]:
+        if not interactive(args):
+            fail("no rigs are defined, and setup needs a terminal; run `rig setup`.")
+        print("No rigs are defined yet, so rig runs first-run setup before launching.", file=sys.stderr)
+        setup()
+        config = load_config()
+    rigs = config["rigs"]
+    if name is None:
+        name = config.get("default")
+        if name is None:
+            fail(f"{rigs_file()} names no default rig; run `rig setup`, or launch one with `rig use <name>`.")
+    elif name not in rigs:
+        fail(f"no rig named {name}. Rigs: {', '.join(rigs)}")
+    cwd = Path.cwd()
+    plugins = resolve(name, rigs)
+    install_missing(name, plugins, cwd, args)
+    chosen = choose_pins(name, plugins, cwd, args)
+    loaded = [pin for pin, load in chosen if load]
+    replaced = {pin["plugin"] for pin in loaded}
+    enabled = [p for p in plugins if p.split("@")[0] not in replaced]
+    extends = rigs[name]["extends"]
+    lineage = f" (extends {', '.join(extends)})" if extends else ""
+    count = f"{len(plugins)} plugin{'' if len(plugins) == 1 else 's'}"
+    sandbox = sandbox_flag or sandboxed(name, rigs)
+    print(f"rig: {name}{lineage}, {count}", *describe_pins(chosen), f"sandbox: {'on' if sandbox else 'off'}",
+          sep="\n", file=sys.stderr)
+    plugin_dirs = [arg for pin in loaded for arg in ("--plugin-dir", pin["path"])]
+    settings = overlay(enabled, known_plugin_ids(cwd), sandbox)
+    exec_claude(["--settings", json.dumps(settings), *plugin_dirs, *args])
+
+
+def cmd_use(args: list[str]) -> int:
+    if not args or args[0].startswith("-"):
+        fail("use takes a rig name: rig use <name> [claude args...]")
+    launch(args[0], args[1:])
+
+
+def cmd_list(args: list[str]) -> int:
+    """RIG-09."""
+    if args:
+        fail("list takes no arguments.")
+    config = load_config()
+    if config is None or not config["rigs"]:
+        print("No rigs defined. Run: rig setup")
+        return 0
+    for name, rig in config["rigs"].items():
+        print(f"{name}{' (default)' if name == config.get('default') else ''}")
+        if rig["extends"]:
+            print(f"  extends: {', '.join(rig['extends'])}")
+        print(f"  plugins: {', '.join(rig['plugins']) or 'none'}")
+        if rig.get("sandbox"):
+            print("  sandbox: on")
+    return 0
+
+
+def pins_file() -> Path:
+    return rig_home() / "pins.yml"
+
+
+def read_pins() -> list[dict]:
+    """Each pin as {path, plugin, pinned_at}, in path order."""
+    path = pins_file()
+    entries = (read_yaml(path) or []) if path.exists() else []
+    if not isinstance(entries, list):
+        fail(f"{path} should hold a list of pins.")
+    return sorted(entries, key=lambda e: str(e["path"]).casefold())
+
+
+def write_pins(pins: list[dict]) -> None:
+    write_yaml(pins_file(), sorted(pins, key=lambda e: str(e["path"]).casefold()))
+
+
+def display(path: Path | str) -> str:
+    path = Path(path)
+    for home in (Path.home(), Path.home().resolve()):
+        if path.is_relative_to(home):
+            return f"~/{path.relative_to(home)}"
+    return str(path)
+
+
+AGE_UNITS = (("year", 365 * 86400), ("month", 30 * 86400), ("week", 7 * 86400),
+             ("day", 86400), ("hour", 3600), ("minute", 60))
+
+
+def age(pinned_at: str) -> str:
+    """How long ago, in the largest whole unit: "3 days ago"."""
+    from datetime import datetime, timezone
+    seconds = (datetime.now(timezone.utc) - datetime.fromisoformat(pinned_at)).total_seconds()
+    for unit, size in AGE_UNITS:
+        if seconds >= size:
+            count = int(seconds // size)
+            return f"{count} {unit}{'' if count == 1 else 's'} ago"
+    return "just now"
+
+
+def manifest_name(path: Path) -> str | None:
+    manifest = path / ".claude-plugin" / "plugin.json"
+    return json.loads(manifest.read_text()).get("name") if manifest.is_file() else None
+
+
+class Unresolved(Exception):
+    """A plugin name that doesn't map to one local clone; the message says why."""
+
+
+def repo_key(url: str) -> tuple[str, str]:
+    """(host, repo path) for an https or scp-style git URL."""
+    match = re.match(r"^(?:https?://|ssh://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?$", url)
+    if not match:
+        raise Unresolved(f"can't read a host and repo path from {url}")
+    return match.group(1), match.group(2)
+
+
+def marketplace_plugins() -> list[tuple[str, dict, dict]]:
+    """(marketplace, its known_marketplaces.json entry, plugin entry) for every plugin a known marketplace lists."""
+    known = Path.home() / ".claude" / "plugins" / "known_marketplaces.json"
+    if not known.exists():
+        raise Unresolved(f"{known} does not exist, so plugin names can't be looked up. Pass a path.")
+    plugins = []
+    for market, entry in json.loads(known.read_text()).items():
+        location = Path(entry["installLocation"])
+        manifest = location if location.is_file() else location / ".claude-plugin" / "marketplace.json"
+        if not manifest.is_file():
+            raise Unresolved(f"marketplace {market} has no manifest at {manifest}")
+        plugins += [(market, entry, plugin) for plugin in json.loads(manifest.read_text()).get("plugins", [])]
+    return plugins
+
+
+def marketplace_sources(name: str) -> list[tuple[str, str]]:
+    """(git URL, path within the repo) for each known marketplace entry named <name>."""
+    sources = []
+    for market, entry, plugin in marketplace_plugins():
+        if plugin.get("name") != name:
+            continue
+        source = plugin["source"]
+        if isinstance(source, str):
+            source, subdir = entry["source"], source
+        else:
+            subdir = source.get("path", "")
+        if source["source"] == "github":
+            url = f"https://github.com/{source['repo']}.git"
+        elif source["source"] in ("url", "git-subdir", "git"):
+            url = source["url"]
+        else:
+            raise Unresolved(f"{name} in {market} comes from a {source['source']} source; pass a path.")
+        sources.append((url, subdir.removeprefix("./")))
+    return sources
+
+
+def origin_url(clone: Path) -> str:
+    return subprocess.run(["git", "-C", str(clone), "remote", "get-url", "origin"],
+                          capture_output=True, text=True).stdout.strip()
+
+
+def resolve_name(name: str, clones: dict[str, Path]) -> Path:
+    """PIN-02: the local clone of the plugin's marketplace source repo."""
+    sources = marketplace_sources(name)
+    if not sources:
+        raise Unresolved(f"no known marketplace lists a plugin named {name}, and ./{name} doesn't exist. Pass a path.")
+    candidates = {}
+    for url, subdir in sources:
+        host, repo = repo_key(url)
+        if host not in clones:
+            raise Unresolved(f"{name} comes from {url}, and {rigs_file()} names no clone folder for {host} "
+                             f"under clones. Add `{host}: <folder holding your {host} clones>` there, or pass a path.")
+        clone = clones[host] / repo
+        if not clone.is_dir():
+            raise Unresolved(f"{name} comes from {url}, which isn't cloned at {clone}. Clone it there or pass a path.")
+        origin = origin_url(clone)
+        if not origin or repo_key(origin) != (host, repo):
+            raise Unresolved(f"{clone} has origin {origin or 'unset'}, not {url}.")
+        candidates[clone / subdir if subdir else clone] = url
+    if len(candidates) > 1:
+        raise Unresolved(f"{name} resolves to {len(candidates)} checkouts; pass one: "
+                         + ", ".join(map(str, candidates)))
+    return next(iter(candidates))
+
+
+def clone_roots() -> dict[str, Path]:
+    config = load_config()
+    return {host: Path(folder).expanduser() for host, folder in (config or {}).get("clones", {}).items()}
+
+
+def show_pins() -> int:
+    """PIN-06."""
+    pins = read_pins()
+    if not pins:
+        print("No plugins pinned.")
+        return 0
+    width = max(len(p["plugin"]) for p in pins)
+    for pin in pins:
+        notes = [f"pinned {age(pin['pinned_at'])}"] + ([] if Path(pin["path"]).is_dir() else ["missing"])
+        print(f"{pin['plugin'].ljust(width)}  {display(pin['path'])}  ({', '.join(notes)})")
+    return 0
+
+
+def cmd_pin(args: list[str]) -> int:
+    """PIN-01..03, PIN-06."""
+    if not args:
+        return show_pins()
+    from datetime import datetime, timezone
+    pins = read_pins()
+    for arg in args:
+        path = Path(arg).expanduser().resolve()
+        if not path.exists():
+            if "/" in arg:
+                fail(f"{path} does not exist.")
+            try:
+                path = resolve_name(arg, clone_roots()).resolve()
+            except Unresolved as unresolved:
+                fail(str(unresolved))
+        name = manifest_name(path)
+        if name is None:
+            fail(f"{path} holds no plugin manifest (.claude-plugin/plugin.json); pin refused.")
+        same = next((p for p in pins if p["plugin"] == name), None)
+        if same and Path(same["path"]) == path:
+            print(f"{PROG}: {name} is already pinned at {display(path)}")
+            continue
+        if same:
+            fail(f"{name} is already pinned at {display(same['path'])}. Unpin it first: rig unpin {name}")
+        pins.append({"path": str(path), "plugin": name,
+                     "pinned_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+        print(f"{PROG}: pinned {name} at {display(path)}")
+    write_pins(pins)
+    return 0
+
+
+def cmd_unpin(args: list[str]) -> int:
+    """PIN-05."""
+    if not args:
+        fail("unpin takes a pinned path or plugin name: rig unpin <path|name>")
+    pins = read_pins()
+    for arg in args:
+        path = Path(arg).expanduser().resolve()
+        matches = [p for p in pins if Path(p["path"]) == path or p["plugin"] == arg or Path(p["path"]).name == arg]
+        if not matches:
+            fail(f"{arg} is not pinned. Pinned: {', '.join(p['plugin'] for p in pins) or 'none'}")
+        if len(matches) > 1:
+            fail(f"{arg} matches {len(matches)} pins; pass the path: " + ", ".join(p["path"] for p in matches))
+        pins.remove(matches[0])
+        print(f"{PROG}: unpinned {matches[0]['plugin']} ({display(matches[0]['path'])})")
+    write_pins(pins)
+    return 0
+
+
+def choose_pins(name: str, plugins: list[str], cwd: Path, args: list[str]) -> list[tuple[dict, bool]]:
+    """PIN-04, PIN-07..10: each pin with whether this launch loads it."""
+    pins = read_pins()
+    for pin in pins:
+        if not Path(pin["path"]).is_dir():
+            fail(f"pinned plugin {pin['plugin']} is missing at {display(pin['path'])}. "
+                 f"Unpin it: rig unpin {pin['plugin']}")
+    in_rig = {plugin_id.split("@")[0] for plugin_id in plugins}
+    asking = interactive(args)
+    chosen = []
+    for pin in pins:
+        if asking and cwd.is_relative_to(Path(pin["path"])):
+            load = ask(f"{display(pin['path'])} is pinned. Load it into this session? [Y/n] ").lower() not in ("n", "no")
+        elif pin["plugin"] in in_rig:
+            load = True
+        elif asking:
+            load = confirmed(f"{pin['plugin']} is pinned at {display(pin['path'])}, and rig {name} doesn't include it. "
+                             "Load it?")
+        else:
+            load = False
+        chosen.append((pin, load))
+    return chosen
+
+
+def describe_pins(chosen: list[tuple[dict, bool]]) -> list[str]:
+    if not chosen:
+        return ["pins: none"]
+    width = max(len(pin["plugin"]) for pin, _ in chosen)
+    lines = []
+    for pin, load in chosen:
+        note = f"pinned {age(pin['pinned_at'])}" + ("" if load else ", not loaded")
+        lines.append(f"{pin['plugin'].ljust(width)}  {display(pin['path'])}  ({note})")
+    return [f"pins: {lines[0]}", *(f"      {line}" for line in lines[1:])]
+
+
+def user_settings_file() -> Path:
+    return Path.home() / ".claude" / "settings.json"
+
+
+def enabled_plugins() -> list[str]:
+    """SETUP-02: the plugins the user's Claude Code settings enable, in file order."""
+    path = user_settings_file()
+    if not path.exists():
+        return []
+    enabled = json.loads(path.read_text()).get("enabledPlugins") or {}
+    return [plugin_id for plugin_id, on in enabled.items() if on]
+
+
+def enabled_groups() -> list[list[str]]:
+    """SETUP-04a: the enabledPlugins entries as the blank-line groups the settings file shows them in.
+
+    Read as text, since a JSON parse drops the blank lines."""
+    path = user_settings_file()
+    text = path.read_text() if path.exists() else ""
+    match = re.search(r'"enabledPlugins"\s*:\s*\{(.*?)\}', text, re.DOTALL)
+    if not match:
+        return []
+    groups, current = [], []
+    for line in match.group(1).splitlines():
+        entry = re.match(r'\s*"([^"]+)"\s*:\s*true\b', line)
+        if entry:
+            current.append(entry.group(1))
+        elif not line.strip() and current:
+            groups.append(current)
+            current = []
+    return groups + ([current] if current else [])
+
+
+def parse_selection(answer: str, count: int) -> list[int] | None:
+    """`1 3 5-7` as zero-based indexes, or None when the answer isn't a selection."""
+    picked = []
+    for token in answer.replace(",", " ").split():
+        match = re.fullmatch(r"(\d+)(?:-(\d+))?", token)
+        if not match:
+            return None
+        low, high = int(match.group(1)), int(match.group(2) or match.group(1))
+        if not 1 <= low <= high <= count:
+            return None
+        picked += range(low - 1, high)
+    return list(dict.fromkeys(picked))
+
+
+def pick(plugins: list[str], prompt: str, preselected: list[str]) -> list[str]:
+    """Number the plugins, marking the preselected ones, and read a selection; blank keeps the marks."""
+    for number, plugin_id in enumerate(plugins, 1):
+        mark = "*" if plugin_id in preselected else " "
+        print(f"  {mark}{number:>3}  {plugin_id}", file=sys.stderr)
+    while True:
+        answer = ask(prompt)
+        if not answer:
+            return [p for p in plugins if p in preselected]
+        indexes = parse_selection(answer, len(plugins))
+        if indexes is not None:
+            return [plugins[i] for i in indexes]
+        print(f"  Enter numbers or ranges between 1 and {len(plugins)}, like: 1 3 5-7", file=sys.stderr)
+
+
+RIG_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+class SetupStopped(Exception):
+    """The user answered q to stop setup."""
+
+
+def ask_rig_name(prompt: str, taken: set[str], suggested: str | None = None) -> str | None:
+    """A new rig's name; None to skip this rig. Raises SetupStopped when the user stops."""
+    while True:
+        answer = ask(prompt) or (suggested or "")
+        if answer == "q":
+            raise SetupStopped
+        if answer in ("", "-"):
+            return None
+        if not RIG_NAME.fullmatch(answer):
+            print("  A rig name is letters, digits, '.', '_', or '-'.", file=sys.stderr)
+        elif answer in taken:
+            print(f"  There's already a rig named {answer}.", file=sys.stderr)
+        else:
+            return answer
+
+
+def suggestions(outside: list[str]) -> list[tuple[str | None, list[str]]]:
+    """SETUP-04a/b: (suggested name, plugins) for each group of plugins outside the base rig."""
+    groups = enabled_groups()
+    if len(groups) > 1:
+        return [(None, kept) for group in groups if (kept := [p for p in group if p in outside])]
+    by_market: dict[str, list[str]] = {}
+    for plugin_id in outside:
+        by_market.setdefault(plugin_id.partition("@")[2] or plugin_id, []).append(plugin_id)
+    return list(by_market.items())
+
+
+def setup() -> None:
+    """SETUP-02..05."""
+    enabled = enabled_plugins()
+    if not enabled:
+        fail(f"{user_settings_file()} enables no plugins, so there's nothing to build rigs from.")
+    config = load_config() or {"default": None, "clones": {}, "rigs": {}}
+    rigs = config["rigs"]
+    base = config.get("default") or "base"
+    current = rigs.get(base, {}).get("plugins") or enabled
+    print(f"Claude Code's settings enable these plugins. Which form the base rig, {base}, "
+          "loaded in every session? (* = current choice)", file=sys.stderr)
+    chosen = pick(enabled, "Base rig plugins (blank keeps the marked ones): ", current)
+    rigs[base] = {**rigs.get(base, {}), "plugins": chosen, "extends": rigs.get(base, {}).get("extends", [])}
+    config.update(default=base, rigs=rigs)
+    save_config(config)
+    print(f"Saved {base} as the default rig ({len(chosen)} plugins).", file=sys.stderr)
+
+    def uncovered() -> list[str]:
+        covered = {p for name in rigs for p in resolve(name, rigs)}
+        return [p for p in enabled if p not in covered]
+
+    try:
+        for suggested, group in suggestions(uncovered()):
+            group = [p for p in group if p in uncovered()]
+            if not group:
+                continue
+            print(f"\nSuggested rig, extending {base}: {', '.join(group)}", file=sys.stderr)
+            hint = f" [{suggested}]" if suggested else ""
+            name = ask_rig_name(f"Name it{hint} (- to skip, q to stop): ", set(rigs), suggested)
+            if name:
+                add_rig(config, name, base, group)
+        while remaining := uncovered():
+            print("\nThese enabled plugins aren't in any rig yet:", file=sys.stderr)
+            group = pick(remaining, "Plugins for another rig (blank to finish): ", [])
+            if not group:
+                break
+            name = ask_rig_name("Name it (q to stop): ", set(rigs))
+            if name:
+                add_rig(config, name, base, group)
+    except SetupStopped:
+        pass
+    print(f"Rigs are in {rigs_file()}. `rig list` shows them.", file=sys.stderr)
+
+
+def add_rig(config: dict, name: str, base: str, plugins: list[str]) -> None:
+    config["rigs"][name] = {"extends": [base], "plugins": plugins}
+    save_config(config)
+    print(f"Saved rig {name}.", file=sys.stderr)
+
+
+def save_config(config: dict) -> None:
+    data = {"default": config["default"]}
+    if config.get("clones"):
+        data["clones"] = config["clones"]
+    data["rigs"] = {name: {k: v for k, v in rig.items() if v not in ([], None)}
+                    for name, rig in config["rigs"].items()}
+    write_yaml(rigs_file(), data)
+
+
+def cmd_setup(args: list[str]) -> int:
+    """SETUP-05."""
+    if args:
+        fail("setup takes no arguments.")
+    if not (sys.stdin.isatty() and sys.stderr.isatty()):
+        fail("setup asks questions, so it needs a terminal.")
+    setup()
+    return 0
+
+
+def cmd_complete(args: list[str]) -> int:
+    """Values for tab completion that the zsh script can't read off disk itself."""
+    if args != ["pinnable"]:
+        fail("complete takes: pinnable")
+    pinned = {Path(p["path"]) for p in read_pins()}
+    clones = clone_roots()
+    try:
+        names = sorted({plugin["name"] for _, _, plugin in marketplace_plugins()})
+    except Unresolved:
+        return 0
+    for name in names:
+        try:
+            path = resolve_name(name, clones)
+        except Unresolved:
+            continue
+        if path.resolve() not in pinned:
+            print(f"{name}:{display(path)}")
+    return 0
+
+
+WRAPPER = Path.home() / ".local" / "bin" / "rig"
+COMPLETION_DIR = Path.home() / ".zsh" / "completions"
+SNIPPET = Path.home() / ".zsh" / "rig.zsh"
+SNIPPET_SENTINEL = "# rig: claude runs rig"
+FPATH_LINE = "fpath=(~/.zsh/completions $fpath)"
+
+
+def wrapper_text(script: Path) -> str:
+    return f'#!/bin/sh\nexec uv run --quiet --script "{script}" "$@"\n'
+
+
+def is_active(line: str) -> bool:
+    return bool(line.strip()) and not line.lstrip().startswith("#")
+
+
+def install_wrapper() -> None:
+    script = (PLUGIN_ROOT / "scripts" / "rig").resolve()
+    text = wrapper_text(script)
+    if WRAPPER.is_file() and WRAPPER.read_text() == text:
+        print(f"  ✓ already installed: {WRAPPER} -> {script}")
+    else:
+        WRAPPER.parent.mkdir(parents=True, exist_ok=True)
+        WRAPPER.write_text(text)
+        WRAPPER.chmod(0o755)
+        print(f"  ✓ wrote {WRAPPER} -> {script}")
+    on_path = {Path(p).expanduser().resolve() for p in os.environ.get("PATH", "").split(os.pathsep) if p}
+    if WRAPPER.parent.resolve() not in on_path:
+        print(f"  ! {WRAPPER.parent} is not on PATH; add it in ~/.zshrc")
+
+
+def install_completions() -> None:
+    COMPLETION_DIR.mkdir(parents=True, exist_ok=True)
+    target = COMPLETION_DIR / "_rig"
+    target.write_text(ZSH_COMPLETION)
+    print(f"  ✓ wrote {target}")
+    zshrc = Path.home() / ".zshrc"
+    content = zshrc.read_text() if zshrc.exists() else ""
+    lines = content.splitlines(keepends=True)
+    if any(is_active(line) and ".zsh/completions" in line for line in lines):
+        print(f"  ✓ {zshrc} already puts ~/.zsh/completions on fpath")
+        return
+    at = next((i for i, line in enumerate(lines) if is_active(line) and "compinit" in line), None)
+    if at is None:
+        if content and not content.endswith("\n"):
+            lines.append("\n")
+        lines += [f"{FPATH_LINE}\n", "autoload -Uz compinit && compinit\n"]
+        print(f"  ✓ added fpath and compinit to {zshrc}")
+    else:
+        lines.insert(at, f"{FPATH_LINE}\n")
+        print(f"  ✓ added fpath before compinit in {zshrc}")
+    zshrc.write_text("".join(lines))
+
+
+def claude_function_origin() -> str | None:
+    """The file that defines a `claude` shell function in a new interactive zsh, or None."""
+    result = subprocess.run(["zsh", "-ic", "whence -v claude"], capture_output=True, text=True,
+                            stdin=subprocess.DEVNULL)
+    last = (result.stdout.strip().splitlines() or [""])[-1]
+    match = re.match(r"^claude is a shell function(?: from (.+))?$", last)
+    if not match:
+        return None
+    return match.group(1) or "an unknown file"
+
+
+SNIPPET_TEXT = f"""{SNIPPET_SENTINEL}: written by `rig install-cli --claude`.
+claude() {{ rig "$@" }}
+# A later compinit drops an earlier compdef, so register at the first prompt.
+autoload -Uz add-zsh-hook
+_rig_compdef_claude() {{
+  compdef _rig claude
+  add-zsh-hook -d precmd _rig_compdef_claude
+}}
+add-zsh-hook precmd _rig_compdef_claude
+"""
+
+
+def install_claude_function(enable: bool) -> None:
+    """SHELL-04: offer `claude` → rig, unless another shell function already defines claude."""
+    origin = claude_function_origin()
+    ours = origin is not None and Path(origin).expanduser() == SNIPPET
+    if origin and not ours:
+        print(f"  · claude is a shell function from {origin}; left as is")
+        return
+    if not enable and not ours:
+        print(f"  · to make claude run rig: {INSTALL_COMMAND} --claude")
+        return
+    SNIPPET.parent.mkdir(parents=True, exist_ok=True)
+    SNIPPET.write_text(SNIPPET_TEXT)
+    zshrc = Path.home() / ".zshrc"
+    content = zshrc.read_text() if zshrc.exists() else ""
+    if SNIPPET_SENTINEL in content:
+        print(f"  ✓ claude runs rig ({SNIPPET})")
+        return
+    with zshrc.open("a") as f:
+        if content and not content.endswith("\n"):
+            f.write("\n")
+        f.write(f"source ~/.zsh/rig.zsh  {SNIPPET_SENTINEL}\n")
+    print(f"  ✓ claude runs rig from new shells ({SNIPPET}, sourced from {zshrc})")
+
+
+def cmd_install_cli(args: list[str]) -> int:
+    """SHELL-01, SHELL-04."""
+    unknown = [a for a in args if a != "--claude"]
+    if unknown:
+        fail(f"install-cli takes only --claude, not {' '.join(unknown)}")
+    import shutil
+    if not shutil.which("uv"):
+        fail("uv is not on PATH; rig runs through it. Install it: https://docs.astral.sh/uv/")
+    install_wrapper()
+    install_completions()
+    install_claude_function("--claude" in args)
+    print("Open a new shell (or run: exec zsh) to pick up the changes.")
+    return 0
+
+
+def wrapper_target() -> Path | None:
+    """The absolute script path the installed wrapper execs, or None without a wrapper."""
+    if not WRAPPER.is_file():
+        return None
+    match = re.search(r'"(/[^"]+)"', WRAPPER.read_text())
+    return Path(match.group(1)) if match else None
+
+
+def in_plugin_cache(path: Path) -> bool:
+    parts = path.parts
+    return any(parts[i:i + 2] == ("plugins", "cache") for i in range(len(parts) - 1))
+
+
+def cmd_freshness(args: list[str]) -> int:
+    """SHELL-02: report a wrapper that no longer runs this install."""
+    target = wrapper_target()
+    this_script = (PLUGIN_ROOT / "scripts" / "rig").resolve()
+    if target is None or target.resolve() == this_script:
+        return 0
+    if target.is_file() and not in_plugin_cache(target):
+        return 0
+    state = "is gone" if not target.is_file() else "is an older install"
+    print(json.dumps({
+        "systemMessage": f"rig: {INSTALL_COMMAND}  # cli is outdated",
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": (
+                f"The rig command at {WRAPPER} runs {target}, which {state}. The loaded plugin is at "
+                f"{PLUGIN_ROOT}. {INSTALL_COMMAND} repoints the wrapper; `rig install-cli` from the shell "
+                "would run the old copy and keep the old path. The command is the user's to run."),
+        },
+    }))
+    return 0
+
+
+ZSH_COMPLETION = r"""#compdef rig
+
+_rig_help_commands() {
+  local cache=$1 tag=$2
+  shift 2
+  (( ${(P)+cache} )) || typeset -ga $cache
+  if (( ! ${(P)#cache} )); then
+    local line name listing=0
+    local -a found
+    for line in ${(f)"$(command claude "$@" --help 2>/dev/null)"}; do
+      [[ $line == Commands:* ]] && { listing=1; continue }
+      (( listing )) && [[ $line =~ '^  ([a-z][a-z|-]*)( [^ ]+)*  +(.*)$' ]] || continue
+      for name in ${(s:|:)match[1]}; do found+=("$name:$match[3]"); done
+    done
+    set -A $cache $found
+  fi
+  (( ${(P)#cache} )) && _describe -t commands $tag $cache
+}
+
+_rig_names() {
+  local file=~/.rig/rigs.yml
+  [[ -r $file ]] || return 1
+  local -a names=(${(f)"$(awk '/^rigs:/ { in_rigs = 1; next } /^[^ ]/ { in_rigs = 0 }
+    in_rigs && /^  [^ #-][^:]*:/ { sub(/^  /, ""); sub(/:.*/, ""); print }' $file 2>/dev/null)"})
+  (( $#names )) && compadd -a names
+}
+
+_rig_pinned() {
+  local file=~/.rig/pins.yml
+  [[ -r $file ]] || return 1
+  local -a names=(${(f)"$(awk '/^[- ] plugin: / { sub(/^[- ] plugin: /, ""); print }' $file 2>/dev/null)"})
+  (( $#names )) && compadd -a names
+}
+
+_rig_pinnable() {
+  local -a pinnable=(${(f)"$(command rig complete pinnable 2>/dev/null)"})
+  (( $#pinnable )) && _describe -t pinnable 'plugin with a local clone' pinnable
+}
+
+_rig() {
+  local -a commands=(
+    'use:Launch Claude Code with a named rig'
+    'list:List the rigs with their plugins'
+    'setup:Choose the base rig and named rigs from the plugins your settings enable'
+    'pin:Use a local plugin checkout in place of the installed copy; bare pin lists the pins'
+    'unpin:Stop using a pinned checkout'
+    'install-cli:Put rig on PATH with completions; --claude makes claude run rig'
+  )
+  local ret=1
+  if [[ $words[2] == rig ]]; then
+    words=($words[1] $words[3,-1])
+    (( CURRENT-- ))
+  elif (( CURRENT == 2 )) && [[ $service == claude ]] && [[ $PREFIX != -* ]]; then
+    local -a prefix=('rig:rig commands')
+    _describe -t rig-prefix 'rig' prefix && ret=0
+  fi
+  if (( CURRENT == 2 )); then
+    if [[ $PREFIX == -* ]]; then
+      local -a flags=('--sandbox:Run Bash in the sandbox, with no unsandboxed commands'
+                      '--help:Show rig help' '--version:Show rig version')
+      _describe -t rig-flags 'rig flag' flags && ret=0
+    else
+      _describe -t rig-commands 'rig command' commands && ret=0
+      _rig_help_commands _rig_claude_cmds 'Claude Code command' && ret=0
+    fi
+    return ret
+  fi
+  if [[ $words[2] == (plugin|plugins) ]]; then
+    if (( CURRENT == 3 )); then
+      local -a taken=('pin:Use a local plugin checkout in place of the installed copy (rig)'
+                      'unpin:Stop using a pinned checkout (rig)')
+      _describe -t rig-commands 'rig command' taken && ret=0
+      _rig_help_commands _rig_plugin_cmds 'Claude Code plugin command' plugin && ret=0
+      return ret
+    fi
+    [[ $words[3] == (pin|unpin) ]] && words=($words[1] $words[3,-1]) && (( CURRENT-- ))
+  fi
+  case $words[2] in
+    use)
+      if (( CURRENT == 3 )); then
+        _rig_names
+      elif [[ $PREFIX == -* ]]; then
+        compadd -- --sandbox
+      else
+        _default
+      fi
+      ;;
+    pin)
+      local ret=1
+      _rig_pinnable && ret=0
+      _directories && ret=0
+      return ret
+      ;;
+    unpin) _rig_pinned ;;
+    install-cli) compadd -- --claude ;;
+    *) _default ;;
+  esac
+}
+
+_rig "$@"
+"""
+
+
+def cmd_completions(args: list[str]) -> int:
+    if args != ["zsh"]:
+        fail("completions takes one shell: zsh")
+    sys.stdout.write(ZSH_COMPLETION)
+    return 0
+
+
+USAGE = f"""usage: rig [<claude args>...]           launch Claude Code with the default rig
+       rig <command> [<args>...]
+
+Commands:
+  use <rig> [<claude args>]  launch Claude Code with the named rig
+  list                       list the rigs with their plugins
+  setup                      choose the base rig and named rigs from the plugins
+                             your Claude Code settings enable
+  pin [<path|name>...]       use a local plugin checkout in place of the installed copy;
+                             with no arguments, list the pins
+  unpin <path|name>...       stop using a pinned checkout
+  install-cli [--claude]     put rig on PATH with tab completion; --claude makes claude run rig
+
+Anything else goes to Claude Code: its subcommands run unchanged, and other
+arguments start a session with the default rig. `rig rig <command>` is the same
+as `rig <command>`, so claude can run rig.
+
+  --sandbox                  with a launch: run Bash in Claude Code's sandbox, failing if
+                             it's unavailable and allowing no unsandboxed commands
+  -h, --help, help           show this help
+  --version                  show rig's version
+"""
+
+COMMANDS = {
+    "use": cmd_use,
+    "list": cmd_list,
+    "setup": cmd_setup,
+    "pin": cmd_pin,
+    "unpin": cmd_unpin,
+    "install-cli": cmd_install_cli,
+    "completions": cmd_completions,
+    "complete": cmd_complete,
+    "freshness": cmd_freshness,
+}
+UNCOMPLETED_COMMANDS = {"completions", "complete", "freshness"}
+CLAUDE_SUBCOMMANDS_TAKEN = {"plugin": ("pin", "unpin"), "plugins": ("pin", "unpin")}
+
+
+def main(argv: list[str]) -> int:
+    if argv[:1] == ["rig"]:
+        argv = argv[1:]
+    elif argv[:1] and argv[1:2] and argv[1] in CLAUDE_SUBCOMMANDS_TAKEN.get(argv[0], ()):
+        argv = argv[1:]
+    if argv[:1] in (["-h"], ["--help"], ["help"]):
+        print(USAGE, end="")
+        return 0
+    if argv[:1] == ["--version"]:
+        print(f"rig {version_display()}")
+        return 0
+    if argv and argv[0] in COMMANDS:
+        return COMMANDS[argv[0]](argv[1:])
+    if argv and not argv[0].startswith("-") and argv[0] in claude_subcommands():
+        exec_claude(argv)
+    launch(None, argv)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

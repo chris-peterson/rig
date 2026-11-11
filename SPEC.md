@@ -51,17 +51,24 @@ plugins as the only plugins enabled, apart from pins.
 When the user runs `rig use <name>`, the system shall launch Claude Code with
 the named rig.
 
-#### `RIG-06`
-When the user runs `rig <name>` and `<name>` is not one of rig's commands, the
-system shall launch Claude Code with the named rig.
+#### ~~`RIG-06`~~
+~~When the user runs `rig <name>` and `<name>` is not one of rig's commands, the
+system shall launch Claude Code with the named rig.~~
+
+_Retired 2026-11-10: a prompt is more common than a rig name, so a bare first
+word goes to Claude Code (LAUNCH-03) and a rig is named with `rig use`
+(RIG-05). The ID is not reused._
 
 #### `RIG-07`
 When the user runs `rig` with no rig named, the system shall launch Claude Code
 with the default rig.
 
-#### `RIG-08`
-If a rig's name matches one of rig's commands, then the system shall reject the
-definition, naming the clash.
+#### ~~`RIG-08`~~
+~~If a rig's name matches one of rig's commands, then the system shall reject the
+definition, naming the clash.~~
+
+_Retired 2026-11-10: with RIG-06 retired, a rig name only follows `use`, so it
+can't clash with a command. The ID is not reused._
 
 #### `RIG-09`
 When the user runs `rig list`, the system shall list each rig with its plugins
@@ -179,12 +186,57 @@ unchanged.
 When a launch starts, the system shall print the rig, the pins, and the sandbox
 state before Claude Code starts.
 
+#### `LAUNCH-03`
+When the user runs `rig` with arguments that don't start with one of rig's
+commands, the system shall launch the default rig and pass the arguments to
+Claude Code.
+
+#### `LAUNCH-04`
+When the first argument is a Claude Code subcommand, the system shall run
+Claude Code with the arguments unchanged, without loading a rig.
+
 ### `SHELL`
 Shell integration
 
-_(none yet, add with `/sextant:spec-req new`)_
+#### `SHELL-01`
+When the user runs `/rig:install-rig`, the system shall put a `rig` command on
+PATH that runs the installed version.
+
+#### `SHELL-02`
+When a session starts and the `rig` command on PATH runs a version other than
+the one installed, the system shall tell the user to run `/rig:install-rig`.
+
+#### `SHELL-03`
+The system shall accept `rig rig <command>` as `rig <command>`, and `rig plugin
+pin|unpin` as `rig pin|unpin`, so `rig` can stand in for `claude`.
+
+#### `SHELL-04`
+Where no other shell function defines `claude`, the install shall offer to make
+`claude` run rig.
 
 ### `TAB`
 Tab completion
 
-_(none yet, add with `/sextant:spec-req new`)_
+#### `TAB-01`
+When the user completes the first argument of `rig`, the system shall offer
+rig's commands together with Claude Code's subcommands.
+
+#### `TAB-02`
+Where `claude` runs rig, the system shall complete `claude` as it completes
+`rig`, also offering `rig` as the first argument.
+
+#### `TAB-03`
+When the user completes the argument after `rig use`, the system shall offer
+the names of the rigs.
+
+#### `TAB-04`
+When the user completes an argument of `rig pin`, the system shall offer the
+marketplace plugins that resolve to a local clone and aren't pinned, along with
+directories.
+
+#### `TAB-05`
+When the user completes an argument of `rig unpin`, the system shall offer the
+pinned plugins.
+
+#### `TAB-06`
+When the user completes a flag of a launch, the system shall offer `--sandbox`.

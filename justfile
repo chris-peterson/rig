@@ -13,11 +13,21 @@ default:
     @echo "  Generated files are written by CI on PRs and main; edit the source, not the output."
     @echo ""
 
+# run rig against a throwaway HOME and a stand-in claude, showing what each launch passes
+[group('start here')]
+demo:
+    @uv run --quiet --with pyyaml python dev/demo.py
+
 # preview the docsify docs site locally
 [group('start here')]
 docs:
     {{shipyard}} build-docs
     docsify serve docs --open
+
+# run the test suite, including the completion parity check
+[group('check your work')]
+test:
+    uv run --quiet --with pyyaml python -m unittest discover -s tests
 
 # project source into the generated artifacts (plugin.json, describe, docs)
 [group('generated files')]

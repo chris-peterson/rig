@@ -32,7 +32,12 @@ suite:
   pitch: "Different work, different plugins? Name the set once and launch with it."
   what: "A rig is a named set of plugins chosen for a kind of work. rig launches Claude Code with the rig you name, loads the plugin checkouts you've pinned so your edits take effect without a release, and turns on the sandbox for a launch or a rig that asks for it."
   # >>> shipyard:describe — generated from source by `shipyard gen-describe`; do not edit >>>
-  describe: {}
+  describe:
+    hooks:
+      cli-freshness: SessionStart — Tells you to run /rig:install-rig when the rig command on PATH runs an outdated install.
+      hooks: 'Hook wiring: SessionStart→cli-freshness.'
+    commands:
+      install-rig: Put the rig command on PATH with tab completion, or refresh it after a plugin update
   # <<< shipyard:describe <<<
 
 docs:
