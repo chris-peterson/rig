@@ -10,6 +10,7 @@ default:
     @echo ""
     @echo "  New here?   just demo         see what each launch hands Claude Code"
     @echo "  Try it?     just run list     run rig from this checkout"
+    @echo "  Live on it? just trial-on     put this checkout's rig on your PATH"
     @echo ""
     @just --list --unsorted --list-heading '' --list-prefix '    '
     @echo ""
@@ -26,6 +27,19 @@ demo:
 [positional-arguments]
 run *args:
     @uv run --quiet --script scripts/rig "$@"
+
+# point the `rig` on your PATH at this working copy, until `just trial-off`
+[group('start here')]
+trial-on:
+    @uv run --quiet --script scripts/rig install-cli
+    @echo
+    @echo "Trialling $(uv run --quiet --script scripts/rig --version) from $(pwd)."
+    @echo "Edits are live, with no reinstall; \`just trial-off\` to revert."
+
+# put the installed plugin build back on your PATH
+[group('start here')]
+trial-off:
+    @bash scripts/trial-off.sh
 
 # preview the docsify docs site locally
 [group('start here')]

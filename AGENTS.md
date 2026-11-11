@@ -16,6 +16,7 @@ requirement and the ledger in the same commit.
 just test             # run the test suite, including completion parity
 just demo             # run rig against a throwaway HOME and a stand-in claude
 just run <args>       # run rig from this checkout against your real setup
+just trial-on         # point the rig on PATH at this checkout; just trial-off reverts
 just check            # claude plugin validate, as the projection job runs it
 just generate         # regenerate plugin.json and docs/ from plugin.yml and the sources
 just check-generated  # generate, then show what it wrote
@@ -31,6 +32,7 @@ the writer for what lands.
 ```text
 plugin.yml               canonical descriptor: manifest, marketplace entry, docs previews
 scripts/rig              the CLI, one Python file run through `uv run --script`; holds the zsh completion
+scripts/trial-off.sh     what `just trial-off` runs: reinstalls the CLI from the newest plugin build
 commands/install-rig.md  the bootstrap that puts `rig` on PATH
 hooks/hooks.yml          hook source; cli-freshness.sh reports a stale `rig` on PATH
 tests/                   unittest suite; a test covering a requirement names its ID
