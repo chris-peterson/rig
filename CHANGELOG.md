@@ -23,7 +23,10 @@
   ([anthropics/claude-code#95982](https://github.com/anthropics/claude-code/issues/95982)).
 - `rig --sandbox` runs Bash in Claude Code's sandbox with no unsandboxed
   commands.
-- A rig that names a plugin you haven't installed offers to install it.
+- A launch with something to decide opens one confirmation screen: the rig
+  and its plugins, marking what installs at launch, then the pins the rig
+  leaves to choose, each preselected as the launch would load it. `enter`
+  launches, `escape` cancels.
 - `/rig:install-rig` puts `rig` on your PATH with zsh tab completion and makes
   `claude` run rig, leaving a `claude` shell function of your own alone. A
   session start tells you when an update left the installed `rig` behind.

@@ -75,8 +75,8 @@ rig list                 # every rig, its plugins, and what it extends
 ```
 
 A rig names plugins as `<plugin>@<marketplace>`. When a rig names one that
-isn't installed, rig offers to install it and launches only once you agree.
-With nobody at a terminal to ask, the launch is refused.
+isn't installed, the launch confirmation (below) lists it, and launching
+installs it first. With nobody at a terminal to confirm, the launch is refused.
 
 Everything rig doesn't recognize goes to Claude Code unchanged. Claude Code's
 own subcommands (`claude plugin list`, `claude mcp`) run without a rig.
@@ -104,9 +104,10 @@ clones:
 ```
 
 At launch, a pin loads when the rig includes its plugin. A pin the rig doesn't
-include is asked about at a terminal, and left out otherwise. Starting inside a
-pinned checkout asks whether to load that pin, since a plugin loaded into its
-own checkout reviews edits to itself.
+include is offered on the launch confirmation, unselected, and left out with
+nobody at a terminal. Starting inside a pinned checkout offers that pin
+selected, so you can leave it out: a plugin loaded into its own checkout
+reviews edits to itself.
 
 When a loaded pin's checkout holds the folder you start in, or sits inside it,
 rig sets `CLAUDE_CODE_AUTO_MODE_SERVER=0` for that session, since auto mode
@@ -124,6 +125,13 @@ The sandbox runs Bash commands in Claude Code's sandbox, fails the launch when
 the sandbox isn't available, and allows no unsandboxed commands.
 
 ## What a launch shows
+
+When a launch has something to decide (a plugin to install, or a pin the rig
+doesn't settle), rig opens one launch confirmation first. The top shows the rig
+you're launching and its plugins, read-only, marking the ones that load from a
+pin or install at launch. Below it are the pins left to choose; toggle them
+with space. `enter` launches, `escape` cancels. A launch with nothing to decide
+skips it.
 
 Before Claude Code starts, rig prints the rig, the pins, and the sandbox state:
 

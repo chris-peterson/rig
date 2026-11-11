@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 PROG = "rig"
 PKG_ROOT = Path(__file__).resolve().parent.parent
@@ -76,16 +77,6 @@ def exec_claude(args: list[str]) -> None:
 def interactive(args: list[str]) -> bool:
     """A person at a terminal starting a session they will type into."""
     return sys.stdin.isatty() and sys.stderr.isatty() and not {"-p", "--print"} & set(args)
-
-
-def ask(question: str) -> str:
-    sys.stderr.write(question)
-    sys.stderr.flush()
-    return sys.stdin.readline().strip()
-
-
-def confirmed(question: str) -> bool:
-    return ask(f"{question} [y/N] ").lower() in ("y", "yes")
 
 
 def yaml_module():
@@ -214,17 +205,9 @@ def overlay(rig_ids: list[str], known: set[str], sandbox: bool) -> dict:
     return {"enabledPlugins": enabled, **({"sandbox": SANDBOX_SETTINGS} if sandbox else {})}
 
 
-def install_missing(name: str, plugins: list[str], cwd: Path, args: list[str]) -> None:
-    """RIG-08, RIG-09: install a rig's missing plugins once the user agrees, or refuse the launch."""
-    missing = [p for p in plugins if p not in installed_for(cwd)]
-    if not missing:
-        return
-    if not interactive(args):
-        fail(f"rig {name} names plugins that aren't installed: {', '.join(missing)}. "
-             "Install them with `claude plugin install <plugin>`, or launch at a terminal to be asked.")
-    for plugin in missing:
-        if not confirmed(f"rig {name} names {plugin}, which isn't installed. Install it?"):
-            fail(f"launch refused: {plugin} isn't installed.")
+def install(plugins: list[str]) -> None:
+    """RIG-08: install the plugins the user confirmed the launch with."""
+    for plugin in plugins:
         if subprocess.run(["claude", "plugin", "install", plugin]).returncode != 0:
             fail(f"`claude plugin install {plugin}` failed; launch refused.")
 
@@ -250,7 +233,7 @@ def settings_flag(args: list[str]) -> bool:
 
 
 def launch(name: str | None, args: list[str]) -> None:
-    """RIG-04, RIG-05, RIG-06, LAUNCH-01..03, SANDBOX-01."""
+    """RIG-04..06, RIG-08, RIG-09, PIN-10, LAUNCH-01..03, LAUNCH-05, SANDBOX-01."""
     sandbox_flag, args = take_sandbox_flag(args)
     if settings_flag(args):
         fail("rig starts Claude Code with its own --settings, and a second --settings replaces the first. "
@@ -272,14 +255,28 @@ def launch(name: str | None, args: list[str]) -> None:
         fail(f"no rig named {name}. Rigs: {', '.join(rigs)}")
     cwd = Path.cwd()
     plugins = resolve(name, rigs)
-    install_missing(name, plugins, cwd, args)
-    chosen = choose_pins(name, plugins, cwd, args)
+    missing = [p for p in plugins if p not in installed_for(cwd)]
+    offered = pin_offers(plugins, cwd)
+    lineage = f" (extends {rigs[name]['extends']})" if rigs[name]["extends"] else ""
+    count = f"{len(plugins)} plugin{'' if len(plugins) == 1 else 's'}"
+    heading = f"rig: {name}{lineage}, {count}"
+    if not interactive(args):
+        if missing:
+            fail(f"rig {name} names plugins that aren't installed: {', '.join(missing)}. "
+                 "Install them with `claude plugin install <plugin>`, or launch at a terminal to be asked.")
+        chosen = [(offer.pin, offer.in_rig) for offer in offered]
+    elif missing or any(not offer.locked for offer in offered):
+        chosen = launch_app(name, rigs[name]["extends"], plugin_sources(name, rigs), missing, offered,
+                            sandbox_flag).run()
+        if chosen is None:
+            fail("launch cancelled.")
+    else:
+        chosen = [(offer.pin, True) for offer in offered]
+    install(missing)
     loaded = [pin for pin, load in chosen if load]
     replaced = {pin["plugin"] for pin in loaded}
     enabled = [p for p in plugins if p.split("@")[0] not in replaced]
-    lineage = f" (extends {rigs[name]['extends']})" if rigs[name]["extends"] else ""
-    count = f"{len(plugins)} plugin{'' if len(plugins) == 1 else 's'}"
-    print(f"rig: {name}{lineage}, {count}", *describe_pins(chosen), *auto_mode_server_off(loaded, cwd),
+    print(heading, *describe_pins(chosen), *auto_mode_server_off(loaded, cwd),
           f"sandbox: {'on' if sandbox_flag else 'off'}", sep="\n", file=sys.stderr)
     plugin_dirs = [arg for pin in loaded for arg in ("--plugin-dir", pin["path"])]
     settings = overlay(enabled, known_plugin_ids(cwd), sandbox_flag)
@@ -497,28 +494,110 @@ def cmd_unpin(args: list[str]) -> int:
     return 0
 
 
-def choose_pins(name: str, plugins: list[str], cwd: Path, args: list[str]) -> list[tuple[dict, bool]]:
-    """PIN-04, PIN-07..10: each pin with whether this launch loads it."""
+class PinOffer(NamedTuple):
+    pin: dict
+    in_rig: bool
+    here: bool
+
+    @property
+    def selected(self) -> bool:
+        """PIN-07..09: selected on the launch confirmation when the rig includes it or the launch starts inside it."""
+        return self.in_rig or self.here
+
+    @property
+    def locked(self) -> bool:
+        """PIN-08: a pin the rig includes loads, unless the launch starts inside it."""
+        return self.in_rig and not self.here
+
+
+def pin_offers(plugins: list[str], cwd: Path) -> list[PinOffer]:
+    """PIN-04: each pin as the launch offers it, stopping the launch on a pin whose checkout is gone."""
     pins = read_pins()
     for pin in pins:
         if not Path(pin["path"]).is_dir():
             fail(f"pinned plugin {pin['plugin']} is missing at {display(pin['path'])}. "
                  f"Unpin it: rig unpin {pin['plugin']}")
     in_rig = {plugin_id.split("@")[0] for plugin_id in plugins}
-    asking = interactive(args)
-    chosen = []
-    for pin in pins:
-        if asking and cwd.is_relative_to(Path(pin["path"])):
-            load = ask(f"{display(pin['path'])} is pinned. Load it into this session? [Y/n] ").lower() not in ("n", "no")
-        elif pin["plugin"] in in_rig:
-            load = True
-        elif asking:
-            load = confirmed(f"{pin['plugin']} is pinned at {display(pin['path'])}, and rig {name} doesn't include it. "
-                             "Load it?")
-        else:
-            load = False
-        chosen.append((pin, load))
-    return chosen
+    return [PinOffer(pin, pin["plugin"] in in_rig, cwd.is_relative_to(Path(pin["path"]))) for pin in pins]
+
+
+def plugin_sources(name: str, rigs: dict) -> dict[str, str]:
+    """Each plugin the rig loads, in load order, with the rig that names it."""
+    chain = [name]
+    while rigs[chain[-1]]["extends"]:
+        chain.append(rigs[chain[-1]]["extends"])
+    sources: dict[str, str] = {}
+    for rig in reversed(chain):
+        for plugin_id in rigs[rig]["plugins"]:
+            sources.setdefault(plugin_id, rig)
+    return sources
+
+
+def launch_app(name: str, extends: str | None, sources: dict[str, str], missing: list[str],
+               offered: list[PinOffer], sandbox: bool):
+    """LAUNCH-05: the rig, read-only, then the pins it leaves open; exits with each pin and whether to load
+    it, or None when cancelled."""
+    from rich.text import Text
+    from textual.app import App, ComposeResult
+    from textual.binding import Binding
+    from textual.containers import VerticalScroll
+    from textual.widgets import Footer, SelectionList, Static
+    from textual.widgets.selection_list import Selection
+
+    pinned = {offer.pin["plugin"]: offer for offer in offered if offer.in_rig}
+    open_pins = [(index, offer) for index, offer in enumerate(offered) if not offer.locked]
+
+    def plugin_line(plugin_id: str) -> Text:
+        line = Text(plugin_id)
+        if sources[plugin_id] != name:
+            line.append(f"  from {sources[plugin_id]}", "dim")
+        offer = pinned.get(plugin_id.split("@")[0])
+        if offer and offer.locked:
+            line.append(f"  pinned at {display(offer.pin['path'])}", "cyan")
+        elif offer:
+            line.append("  pinned here; choose below", "cyan")
+        if plugin_id in missing:
+            line.append("  not installed; installs at launch", "yellow")
+        return line
+
+    def pin_option(index: int, offer: PinOffer) -> Selection:
+        label = Text.assemble(offer.pin["plugin"], f"  {display(offer.pin['path'])}")
+        if offer.in_rig:
+            label.append("  holds this folder; unselected, the installed copy loads", "dim")
+        elif offer.here:
+            label.append("  holds this folder", "dim")
+        return Selection(label, index, offer.selected)
+
+    class LaunchConfirmation(App):
+        TITLE = "rig"
+        BINDINGS = [Binding("enter", "launch", "Launch", priority=True),
+                    Binding("escape,q", "cancel", "Cancel")]
+        CSS = """
+        #rig { height: auto; max-height: 60%; border: round $primary; padding: 0 1; }
+        #pins { height: auto; max-height: 1fr; border: round $accent; }
+        #sandbox { padding: 0 1; }
+        """
+
+        def compose(self) -> ComposeResult:
+            with VerticalScroll(id="rig") as rig:
+                rig.border_title = f"rig {name}" + (f" (extends {extends})" if extends else " (the base rig)")
+                rig.can_focus = False
+                yield Static(Text("\n").join(plugin_line(p) for p in sources) or Text("no plugins", "dim"))
+            if open_pins:
+                pins = SelectionList(*(pin_option(index, offer) for index, offer in open_pins), id="pins")
+                pins.border_title = "pins to load (space toggles)"
+                yield pins
+            yield Static(f"sandbox: {'on' if sandbox else 'off'}", id="sandbox")
+            yield Footer()
+
+        def action_launch(self) -> None:
+            selected = set(self.query_one("#pins", SelectionList).selected) if open_pins else set()
+            self.exit([(offer.pin, offer.locked or index in selected) for index, offer in enumerate(offered)])
+
+        def action_cancel(self) -> None:
+            self.exit(None)
+
+    return LaunchConfirmation()
 
 
 def describe_pins(chosen: list[tuple[dict, bool]]) -> list[str]:

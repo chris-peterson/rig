@@ -20,7 +20,8 @@ import time
 import unittest
 from pathlib import Path
 
-KEYS = {"space": b" ", "enter": b"\r", "down": b"\x1b[B", "s": b"s", "q": b"q", "d": b"d"}
+KEYS = {"space": b" ", "enter": b"\r", "escape": b"\x1b", "down": b"\x1b[B", "s": b"s", "q": b"q", "d": b"d"}
+ALT_SCREEN = b"\x1b[?1049h"
 
 REPO = Path(__file__).resolve().parent.parent
 RIG = REPO / "scripts" / "rig"
@@ -75,6 +76,7 @@ class RigCase(unittest.TestCase):
             "HOME": str(self.home),
             "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
             "RIG_TEST_ARGV": str(self.argv_log),
+            "TERM": "xterm-256color",
         }
 
     def tearDown(self):
@@ -98,7 +100,7 @@ class RigCase(unittest.TestCase):
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             ready, _, _ = select.select([master], [], [], 0.3)
-            if pending and not ready and b"\x1b[?1049h" in output:
+            if pending and not ready and ALT_SCREEN in output:
                 os.write(master, pending.pop(0))
                 continue
             if ready:
@@ -288,18 +290,18 @@ class Rigs(RigCase):
         self.assertIn("b@m", result.stderr)
         self.assertEqual(self.claude_calls(), [])
 
-    def test_rig_08_missing_plugin_installed_after_yes(self):
+    def test_rig_08_missing_plugin_installed_on_launch(self):
         self.write_installed("a@m")
-        status, _ = self.rig_tty("claude", answers="y\n")
-        self.assertEqual(status, 0)
+        status, output = self.rig_tty("claude", keys=["enter"])
+        self.assertEqual(status, 0, output)
         self.assertEqual(self.claude_calls()[0], ["plugin", "install", "b@m"])
         self.assertEqual(self.claude_calls()[1][0], "--settings")
 
-    def test_rig_08_missing_plugin_refused_after_no(self):
+    def test_rig_08_missing_plugin_refused_on_cancel(self):
         self.write_installed("a@m")
-        status, output = self.rig_tty("claude", answers="n\n")
+        status, output = self.rig_tty("claude", keys=["escape"])
         self.assertNotEqual(status, 0)
-        self.assertIn("launch refused: b@m isn't installed", output)
+        self.assertIn("launch cancelled", output)
         self.assertEqual(self.claude_calls(), [])
 
     def test_rig_08_project_scope_install_counts(self):
@@ -671,11 +673,10 @@ class Pins(RigCase):
         self.rig("pin", str(self.ckout))
         self.assertRegex(self.rig("pin").stdout, r"^b  ~/src/b  \(pinned just now\)\n$")
 
-    def test_pin_07_asks_inside_pinned_checkout(self):
+    def test_pin_07_pin_holding_cwd_can_be_left_out(self):
         self.rig("pin", str(self.ckout))
-        status, output = self.rig_tty("claude", answers="n\n", cwd=self.ckout)
+        status, output = self.rig_tty("claude", keys=["space", "enter"], cwd=self.ckout)
         self.assertEqual(status, 0, output)
-        self.assertIn("~/src/b is pinned. Load it into this session?", output)
         overlay, args = self.launched()
         self.assertNotIn("--plugin-dir", args)
         self.assertIs(overlay["enabledPlugins"]["b@m"], True)
@@ -719,12 +720,18 @@ class Pins(RigCase):
         self.assertEqual(self.auto_mode_server(), "1")
         self.assertNotIn("auto mode:", result.stderr)
 
-    def test_pin_09_asks_about_pin_outside_rig(self):
+    def test_pin_09_pin_outside_rig_can_be_loaded(self):
         self.rig("pin", str(self.checkout("x")))
-        status, output = self.rig_tty("claude", answers="y\n")
+        status, output = self.rig_tty("claude", keys=["space", "enter"])
         self.assertEqual(status, 0, output)
-        self.assertIn("x is pinned at ~/src/x, and rig base doesn't include it. Load it?", output)
         self.assertIn("--plugin-dir", self.launched()[1])
+
+    def test_launch_05_nothing_to_choose_launches_without_confirmation(self):
+        self.rig("pin", str(self.ckout))
+        status, output = self.rig_tty("claude")
+        self.assertEqual(status, 0, output)
+        self.assertNotIn(ALT_SCREEN.decode(), output)
+        self.assertEqual(self.launched()[1][:1], ["--plugin-dir"])
 
     def test_pin_10_pin_outside_rig_left_out_headless(self):
         self.rig("pin", str(self.checkout("x")))
@@ -810,7 +817,6 @@ class Setup(RigCase):
     def setUp(self):
         super().setUp()
         self.write_installed("a@m", "b@m", "c@n", "d@n", "e@o", "f@o")
-        self.env["TERM"] = "xterm-256color"
 
     def settings(self, text: str) -> None:
         path = self.home / ".claude" / "settings.json"
@@ -1240,6 +1246,61 @@ class Editor(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertFalse(app.is_running)
         self.assertEqual(self.saved()["rigs"]["base"], {"plugins": ["b@m"]})
+
+
+class LaunchConfirmation(unittest.IsolatedAsyncioTestCase):
+    """The launch confirmation on screen, driven by keys."""
+
+    rig = load_rig()
+
+    def offers(self):
+        pin = lambda name: {"plugin": name, "path": f"/src/{name}", "pinned_at": "2026-01-01T00:00:00+00:00"}
+        offer = self.rig.PinOffer
+        return [offer(pin("inrig"), True, False), offer(pin("here"), True, True), offer(pin("outside"), False, False)]
+
+    def running(self, missing=()):
+        sources = {"a@m": "base", "inrig@m": "base", "here@m": "web", "z@m": "web"}
+        app = self.rig.launch_app("web", "base", sources, list(missing), self.offers(), False)
+        return app, app.run_test(size=(110, 30))
+
+    def choices(self, app) -> dict[str, bool]:
+        return {pin["plugin"]: load for pin, load in app.return_value}
+
+    async def test_launch_05_rig_shown_read_only_with_its_pins(self):
+        app, running = self.running(missing=["z@m"])
+        async with running as pilot:
+            await pilot.pause()
+            rig = app.query_one("#rig")
+            self.assertEqual(rig.border_title, "rig web (extends base)")
+            shown = str(rig.query_one("Static").render())
+            self.assertIn("a@m  from base", shown)
+            self.assertIn("inrig@m  from base  pinned at /src/inrig", shown)
+            self.assertIn("z@m  not installed; installs at launch", shown)
+            await pilot.press("enter")
+        self.assertEqual(self.choices(app), {"inrig": True, "here": True, "outside": False})
+
+    async def test_launch_05_only_pins_the_rig_leaves_open_are_offered(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            listing = app.query_one("#pins")
+            values = [listing.get_option_at_index(i).value for i in range(listing.option_count)]
+            self.assertEqual(values, [1, 2])
+            self.assertEqual(listing.selected, [1])
+
+    async def test_launch_05_space_toggles_a_pin(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("space", "down", "space", "enter")
+        self.assertEqual(self.choices(app), {"inrig": True, "here": False, "outside": True})
+
+    async def test_launch_05_escape_cancels(self):
+        app, running = self.running(missing=["z@m"])
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("escape")
+        self.assertIsNone(app.return_value)
 
 
 class CompletionParity(unittest.TestCase):

@@ -61,9 +61,9 @@ When the user runs `rig list`, the system shall list each rig with its plugins
 and the rig it extends.
 
 #### `RIG-08`
-If a rig names a plugin that is not installed, then the system shall offer to
-install it, launch only after the user confirms, and refuse the launch if the
-user declines.
+If a rig names a plugin that is not installed, then the system shall list it
+on the launch confirmation, install it once the user confirms the launch, and
+refuse the launch if the user cancels.
 
 #### `RIG-09`
 If a rig names a plugin that is not installed and no one is at a terminal to
@@ -197,7 +197,7 @@ with when each was pinned.
 
 #### `PIN-07`
 When an interactive launch starts inside a pinned checkout, the system shall
-ask whether to load that pin.
+offer that pin on the launch confirmation, selected.
 
 #### `PIN-08`
 When a launch's rig includes a pinned plugin, the system shall load the pinned
@@ -205,7 +205,7 @@ checkout in place of the installed copy.
 
 #### `PIN-09`
 When an interactive launch's rig does not include a pinned plugin, the system
-shall ask whether to load that pin.
+shall offer that pin on the launch confirmation, unselected.
 
 #### `PIN-10`
 If a launch's rig does not include a pinned plugin and no one is at a terminal
@@ -244,6 +244,12 @@ Claude Code.
 #### `LAUNCH-04`
 When the first argument is a Claude Code subcommand, the system shall run
 Claude Code with the arguments unchanged, without loading a rig.
+
+#### `LAUNCH-05`
+When an interactive launch has a plugin to install or a pin to choose, the
+system shall show one launch confirmation: the rig and its plugins, read-only,
+then the pins the rig leaves to choose, launching on enter and refusing the
+launch on escape.
 
 ### `SHELL`
 Shell integration
