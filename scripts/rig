@@ -1372,8 +1372,6 @@ def cmd_completions(args: list[str]) -> int:
 
 DOCTOR_PROBE = r"""
 typeset -a found=(${^fpath}/_rig(N))
-autoload -Uz compaudit
-print -r -- "rig-doctor insecure=${(j:,:)${(f)$(compaudit 2>/dev/null)}}"
 print -r -- "rig-doctor rig=$(whence -p rig)"
 print -r -- "rig-doctor claude=$(whence -v claude)"
 print -r -- "rig-doctor completer=$found[1]"
@@ -1469,12 +1467,8 @@ def check_rig_completion(probe: dict[str, str]) -> Check:
         return False, f"a new zsh doesn't have {display(COMPLETION_DIR)} on fpath", FIX_INSTALL
     if not same_file(found, target):
         return False, f"a new zsh loads _rig from {display(found)} first", f"remove {display(found)}"
-    insecure = list(dict.fromkeys(display(d) for d in probe.get("insecure", "").split(",") if d))
-    if probe.get("compinit") != "1" and insecure:
-        return (False, f"compinit refused directories others can write to: {', '.join(insecure)}",
-                f"chmod go-w {' '.join(insecure)}")
     if probe.get("compinit") != "1":
-        return False, "~/.zshrc doesn't run compinit", FIX_INSTALL
+        return False, "compinit didn't run in a new zsh", FIX_INSTALL
     if probe.get("comp-rig") != "_rig":
         return False, "compinit didn't register rig's completion", unregistered_completion_fix()
     return True, "zsh completes rig", ""

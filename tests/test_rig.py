@@ -581,14 +581,6 @@ class Doctor(RigCase):
             self.assertEqual(folder.stat().st_mode & 0o777, 0o755)
         self.assertIn("✓ zsh completes rig", self.rig("doctor").stdout)
 
-    def test_doctor_03_group_writable_completion_dir(self):
-        (self.home / ".zshrc").write_text("autoload -Uz compinit && compinit\n")
-        self.rig("install-cli")
-        (self.home / ".zsh" / "completions").chmod(0o775)
-        output = self.rig("doctor").stdout
-        self.assertRegex(output, r"✗ compinit refused directories others can write to: .*~/\.zsh/completions")
-        self.assertRegex(output, r"fix: chmod go-w .*~/\.zsh/completions")
-
     def test_doctor_03_claude_not_completed_as_rig(self):
         self.assertIn("✗ zsh doesn't complete claude as rig", self.rig("doctor").stdout)
 
