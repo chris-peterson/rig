@@ -4,8 +4,9 @@
 
 - `claude` launches Claude Code with the default rig, and `rig use <name>` with
   a named one: the rig's plugins, and the plugins of the rigs it extends, are
-  the only ones enabled for that session. Your Claude Code settings are
-  unchanged. `rig` on its own prints its usage.
+  enabled for that session. Each launch turns off the plugins your
+  `~/.claude/settings.json` enables, so `/plugin enable` works mid-session and
+  lasts until the next launch. `rig` on its own prints its usage.
 - Arguments rig doesn't recognize go to Claude Code unchanged, so prompts and
   flags work as they do with `claude`. Claude Code's own subcommands
   (`rig plugin list`, `rig mcp`) run without a rig.

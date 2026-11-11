@@ -197,10 +197,13 @@ def known_plugin_ids(cwd: Path) -> set[str]:
     return ids
 
 
-def overlay(rig_ids: list[str], known: set[str], sandbox: bool) -> dict:
-    """RIG-04, SANDBOX-01: settings that enable the rig's plugins, turn every other plugin off,
-    and turn on the sandbox with no unsandboxed commands when asked."""
-    enabled = {plugin_id: False for plugin_id in sorted(known)}
+def overlay(rig_ids: list[str], pinned: set[str], known: set[str], sandbox: bool) -> dict:
+    """RIG-04, PIN-08, SANDBOX-01: settings that enable the rig's plugins, turn off the installed copy of each
+    loaded pin, and turn on the sandbox with no unsandboxed commands when asked.
+
+    Every other plugin is left to the settings files, since a --settings value outranks them all and would
+    keep a plugin enabled mid-session from loading."""
+    enabled = {plugin_id: False for plugin_id in sorted(known) if plugin_id.split("@")[0] in pinned}
     enabled.update({plugin_id: True for plugin_id in rig_ids})
     return {"enabledPlugins": enabled, **({"sandbox": SANDBOX_SETTINGS} if sandbox else {})}
 
@@ -268,7 +271,7 @@ def launch(name: str | None, args: list[str]) -> None:
 
 
 def claude_args(name: str, args: list[str], sandbox_flag: bool) -> list[str]:
-    """RIG-04, RIG-05, RIG-08, RIG-09, PIN-10, LAUNCH-01..02, LAUNCH-05: the arguments that start Claude Code
+    """RIG-04, RIG-05, RIG-08, RIG-09, RIG-12, PIN-10, LAUNCH-01..02, LAUNCH-05: the arguments that start Claude Code
     with the rig, once its plugins are installed and its pins chosen."""
     rigs = load_config()["rigs"]
     if name not in rigs:
@@ -293,13 +296,15 @@ def claude_args(name: str, args: list[str], sandbox_flag: bool) -> list[str]:
     else:
         chosen = [(offer.pin, True) for offer in offered]
     install(missing)
+    turned_off = [p for p in turn_off_user_plugins() if p not in plugins]
     loaded = [pin for pin, load in chosen if load]
     replaced = {pin["plugin"] for pin in loaded}
     enabled = [p for p in plugins if p.split("@")[0] not in replaced]
-    print(heading, *describe_pins(chosen), *auto_mode_server_off(loaded, cwd),
+    stray = [f"turned off in {display(user_settings_file())}: {', '.join(turned_off)}"] if turned_off else []
+    print(heading, *describe_pins(chosen), *stray, *auto_mode_server_off(loaded, cwd),
           f"sandbox: {'on' if sandbox_flag else 'off'}", sep="\n", file=sys.stderr)
     plugin_dirs = [arg for pin in loaded for arg in ("--plugin-dir", pin["path"])]
-    settings = overlay(enabled, known_plugin_ids(cwd), sandbox_flag)
+    settings = overlay(enabled, replaced, known_plugin_ids(cwd), sandbox_flag)
     return ["--settings", json.dumps(settings), *plugin_dirs, *args]
 
 
@@ -712,6 +717,25 @@ def enabled_plugins() -> list[str]:
         return []
     enabled = json.loads(path.read_text()).get("enabledPlugins") or {}
     return [plugin_id for plugin_id, on in enabled.items() if on]
+
+
+def turn_off_user_plugins() -> list[str]:
+    """RIG-12: set each plugin the user's settings enable to false, returning those plugins.
+
+    Edits the text rather than re-serializing, so the file's layout and its blank-line groups (SETUP-04a)
+    survive."""
+    on = enabled_plugins()
+    if not on:
+        return []
+    path = user_settings_file()
+    text = path.read_text()
+    block = re.search(r'"enabledPlugins"\s*:\s*\{(.*?)\}', text, re.DOTALL)
+    edited = text[:block.start(1)] + re.sub(r'("[^"]+"\s*:\s*)true\b', r"\1false", block.group(1)) + text[block.end(1):]
+    left_on = [p for p, value in (json.loads(edited).get("enabledPlugins") or {}).items() if value]
+    if left_on:
+        fail(f"couldn't turn off {', '.join(left_on)} in {path}; set them to false there, then launch again.")
+    path.write_text(edited)
+    return on
 
 
 def enabled_groups() -> list[list[str]]:

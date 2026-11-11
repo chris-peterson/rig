@@ -34,9 +34,16 @@ own doctor runs after rig's checks, so `claude doctor` reports both.
 
 ## Rigs
 
-A rig is a named list of plugins. A launch enables exactly that list, plus the
-pins below, and turns every other plugin off for that session only. Your Claude
-Code settings stay as they are.
+A rig is a named list of plugins. A launch enables that list, plus the pins
+below, for that session.
+
+Each launch also turns off every plugin your `~/.claude/settings.json`
+enables, so a session starts with the rig and nothing else, and names any it
+turned off that the rig doesn't include. A plugin you enable during a session
+with `/plugin enable` loads in that session and is off again at the next
+launch. Plugins a repo's own `.claude/settings.json` enables load alongside the
+rig. Claude Code started some other way (an IDE, the desktop app) reads the
+same settings file, so it starts without the plugins rig turned off.
 
 Every rig but the base rig extends one other rig, so every rig carries the
 base rig's plugins.

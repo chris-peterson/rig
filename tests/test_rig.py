@@ -240,20 +240,28 @@ class Rigs(RigCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("a rig has plugins and extends, not sandbox", result.stderr)
 
-    def test_rig_04_only_rig_plugins_enabled(self):
-        self.write_settings(self.home, {"d@n": True, "e@n": True})
+    def test_rig_04_launch_settings_name_only_the_rig(self):
+        self.write_settings(self.home, {"d@n": False})
         self.rig("-p", "hi")
-        enabled = self.launched()[0]["enabledPlugins"]
-        self.assertEqual({k for k, v in enabled.items() if v}, {"a@m", "b@m"})
-        self.assertIs(enabled["d@n"], False)
-        self.assertIs(enabled["e@n"], False)
+        self.assertEqual(self.launched()[0]["enabledPlugins"], {"a@m": True, "b@m": True})
 
-    def test_rig_04_project_settings_plugins_turned_off(self):
+    def test_rig_04_project_settings_left_to_the_project(self):
         project = self.home / "src" / "proj"
         project.mkdir(parents=True)
         self.write_settings(project, {"p@n": True})
         self.rig("-p", "hi", cwd=project)
-        self.assertIs(self.launched()[0]["enabledPlugins"]["p@n"], False)
+        self.assertNotIn("p@n", self.launched()[0]["enabledPlugins"])
+        self.assertIn('"p@n": true', (project / ".claude" / "settings.json").read_text())
+
+    def test_rig_12_user_settings_plugins_turned_off(self):
+        path = self.home / ".claude" / "settings.json"
+        path.write_text('{\n  "enabledPlugins": {\n    "a@m": true,\n\n    "d@n": true,\n    "e@n": false\n  },\n'
+                        '  "model": "opus"\n}\n')
+        result = self.rig("-p", "hi")
+        self.assertIn("turned off in ~/.claude/settings.json: d@n\n", result.stderr)
+        self.assertEqual(path.read_text(), '{\n  "enabledPlugins": {\n    "a@m": false,\n\n    "d@n": false,\n'
+                                           '    "e@n": false\n  },\n  "model": "opus"\n}\n')
+        self.assertNotIn("turned off", self.rig("-p", "hi").stderr)
 
     def test_rig_05_use_launches_named_rig(self):
         result = self.rig("use", "web", "-p", "hi")

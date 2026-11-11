@@ -6,14 +6,14 @@ Maintained by `/sextant:spec-status`.
 **Last audit:** 2026-11-11
 **Spec version:** root SPEC.md (unversioned)
 **Plugin version:** unreleased
-**Coverage:** 71 Covered, 0 Partial, 0 Missing/Contradicts
+**Coverage:** 72 Covered, 0 Partial, 0 Missing/Contradicts
 **Evidence pointers:** file
 
 ## Status by category
 
 | Prefix | Count | Status | Notes |
 |--------|------:|--------|-------|
-| RIG-01..11 | 11 | All Covered | `scripts/rig` (`load_config`, `resolve`), tests in `tests/test_rig.py`. RIG-04 is a per-launch `--settings` overlay of `enabledPlugins`, which outranks user and project settings (verified 2026-11-10) |
+| RIG-01..12 | 12 | All Covered | `scripts/rig` (`load_config`, `resolve`, `overlay`, `turn_off_user_plugins`), tests in `tests/test_rig.py`. RIG-04 is a per-launch `--settings` overlay that names only the rig's plugins and pinned plugins' installed copies, since a `--settings` value outranks every settings file. RIG-12 edits `~/.claude/settings.json` as text to keep its blank-line groups. `/plugin enable` loading mid-session under the new overlay hasn't been tried |
 | SETUP-01..06 | 8 | All Covered | `scripts/rig` (`RigEdits`, `setup`, `launch`), tests in `tests/test_rig.py`; SETUP-01 and SETUP-05 drive the editor through a pty. Includes SETUP-04a..b. SETUP-04a reads the settings file as text, since the blank lines don't survive a JSON parse. `claude plugin disable` rewrites the file without them (verified 2026-11-10, Claude Code project scope), so the groups last only in a file edited by hand |
 | EDITOR-01..12 | 12 | All Covered | `scripts/rig` (`RigEdits`, `editor_app`), tests in `tests/test_rig.py` drive it headless with Textual's pilot, keys and clicks |
 | PIN-01..11 | 11 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. PIN-08 uses `--plugin-dir`: the checkout loads as `<name>@inline` and the installed copy doesn't load, including when the overlay disables it (verified 2026-11-10). PIN-11 (`auto_mode_server_off`) works around anthropics/claude-code#95982 |
@@ -25,6 +25,11 @@ Maintained by `/sextant:spec-status`.
 | DOCTOR-01..05 | 5 | All Covered | `scripts/rig` (`cmd_doctor`, `shell_probe`), tests in `tests/test_rig.py` probe a new zsh in a throwaway HOME. On a live machine (2026-11-10) it caught a `~/.zcompdump` from before `_rig`, read by `compinit -C` |
 
 ## Audit history
+
+### 2026-11-11: Launch leaves other plugins to the settings files (spec-status)
+
+STATUS.md updated: +1 ID (RIG-12, Covered); RIG-04 reworded, still Covered.
+Coverage 72 of 72.
 
 ### 2026-11-11: Switching rigs mid-session (spec-status)
 

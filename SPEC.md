@@ -47,7 +47,8 @@ launch, naming the rigs in the cycle.
 
 #### `RIG-04`
 When a launch uses a rig, the system shall start Claude Code with that rig's
-plugins as the only plugins enabled, apart from pins.
+plugins enabled for that session, setting no other plugin's state apart from
+pins, so a plugin enabled during the session loads.
 
 #### `RIG-05`
 When the user runs `rig use <name>`, the system shall launch Claude Code with
@@ -77,6 +78,10 @@ naming the rig.
 #### `RIG-11`
 If more than one rig extends no other rig, then the system shall refuse the
 launch, naming those rigs.
+
+#### `RIG-12`
+When a launch starts, the system shall turn off each plugin the user's Claude
+Code settings file enables, naming the ones the rig doesn't include.
 
 ### `SETUP`
 First-run setup
