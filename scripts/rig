@@ -1114,6 +1114,14 @@ def is_active(line: str) -> bool:
     return bool(line.strip()) and not line.lstrip().startswith("#")
 
 
+def make_zsh_dir(path: Path) -> None:
+    """Create path and its parents under HOME without group or world write, whatever the umask:
+    compinit refuses a completion directory that others can write to."""
+    for folder in reversed([path, *path.parents]):
+        if folder.is_relative_to(Path.home()) and folder != Path.home() and not folder.exists():
+            folder.mkdir(mode=0o755)
+
+
 def runs_compinit(line: str) -> bool:
     return is_active(line) and re.search(r"\bcompinit\b", line) is not None
 
@@ -1138,7 +1146,7 @@ def install_wrapper() -> None:
 
 
 def install_completions() -> None:
-    COMPLETION_DIR.mkdir(parents=True, exist_ok=True)
+    make_zsh_dir(COMPLETION_DIR)
     target = COMPLETION_DIR / "_rig"
     target.write_text(ZSH_COMPLETION)
     print(f"  ✓ wrote {target}")
@@ -1189,7 +1197,7 @@ def install_claude_function() -> None:
     if origin and Path(origin).expanduser() != SNIPPET:
         print(f"  · claude is a shell function from {origin}; left as is")
         return
-    SNIPPET.parent.mkdir(parents=True, exist_ok=True)
+    make_zsh_dir(SNIPPET.parent)
     SNIPPET.write_text(SNIPPET_TEXT)
     zshrc = Path.home() / ".zshrc"
     content = zshrc.read_text() if zshrc.exists() else ""
@@ -1364,6 +1372,8 @@ def cmd_completions(args: list[str]) -> int:
 
 DOCTOR_PROBE = r"""
 typeset -a found=(${^fpath}/_rig(N))
+autoload -Uz compaudit
+print -r -- "rig-doctor insecure=${(j:,:)${(f)$(compaudit 2>/dev/null)}}"
 print -r -- "rig-doctor rig=$(whence -p rig)"
 print -r -- "rig-doctor claude=$(whence -v claude)"
 print -r -- "rig-doctor completer=$found[1]"
@@ -1459,6 +1469,10 @@ def check_rig_completion(probe: dict[str, str]) -> Check:
         return False, f"a new zsh doesn't have {display(COMPLETION_DIR)} on fpath", FIX_INSTALL
     if not same_file(found, target):
         return False, f"a new zsh loads _rig from {display(found)} first", f"remove {display(found)}"
+    insecure = [display(d) for d in probe.get("insecure", "").split(",") if d]
+    if probe.get("compinit") != "1" and insecure:
+        return (False, f"compinit refused directories others can write to: {', '.join(insecure)}",
+                f"chmod go-w {' '.join(insecure)}")
     if probe.get("compinit") != "1":
         return False, "~/.zshrc doesn't run compinit", FIX_INSTALL
     if probe.get("comp-rig") != "_rig":

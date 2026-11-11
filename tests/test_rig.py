@@ -568,6 +568,22 @@ class Doctor(RigCase):
             dump.unlink()
         self.assertIn("✓ zsh completes rig", self.rig("doctor").stdout)
 
+    def test_doctor_03_install_under_group_writable_umask_passes(self):
+        old = os.umask(0o002)
+        try:
+            self.rig("install-cli")
+        finally:
+            os.umask(old)
+        for folder in (self.home / ".zsh", self.home / ".zsh" / "completions"):
+            self.assertEqual(folder.stat().st_mode & 0o777, 0o755)
+        self.assertIn("✓ zsh completes rig", self.rig("doctor").stdout)
+
+    def test_doctor_03_group_writable_completion_dir(self):
+        self.rig("install-cli")
+        (self.home / ".zsh" / "completions").chmod(0o775)
+        self.assertIn("✗ compinit refused directories others can write to: ~/.zsh/completions\n"
+                      "      fix: chmod go-w ~/.zsh/completions\n", self.rig("doctor").stdout)
+
     def test_doctor_03_claude_not_completed_as_rig(self):
         self.assertIn("✗ zsh doesn't complete claude as rig", self.rig("doctor").stdout)
 
