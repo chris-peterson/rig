@@ -27,7 +27,7 @@ marketplace:
 # → marketplace SPA; keys mirror the SPA's PLUGINS object.
 suite:
   cli: true
-  group: bearings
+  group: passage
   gloss: "rig: pick the plugins for the job."
   pitch: "Different work, different plugins? Name the set once and launch with it."
   what: "A rig is a named set of plugins chosen for a kind of work. rig launches Claude Code with the rig you name, loads the plugin checkouts you've pinned so your edits take effect without a release, and turns on the sandbox for a launch that asks for it."
