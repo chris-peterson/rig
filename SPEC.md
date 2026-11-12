@@ -14,19 +14,19 @@ below its category's heading, so every requirement has a linkable anchor
 
 ## Concepts
 
-- **rig**: a named set of plugins chosen for a kind of work. Every rig but the
-  base rig extends one other rig and loads its plugins too, so each rig carries
-  the base rig's plugins.
-- **base rig**: the one rig that extends no other. First-run setup creates it
-  from the plugins you want in every session.
-- **default rig**: the rig a launch uses when it names none.
+- **rig**: a named set of plugins chosen for a kind of work. A launch loads the
+  base rig and any number of other rigs on top of it.
+- **base rig**: the rig named `base`, which every launch loads. First-run setup
+  creates it from the plugins you want in every session.
+- **full**: a rig that rig provides, holding every installed plugin.
+- **default rigs**: the rigs a launch adds to the base rig when it names none.
 - **pin**: a local plugin checkout that stands in for the plugin's installed
   copy, so changes to the checkout can be used for a stretch of real work
   before a marketplace release.
 - **sandbox**: Claude Code's sandbox for Bash commands, which a launch can turn
   on.
 - **launch**: one start of Claude Code through rig.
-- **switch**: moving a session to another rig, carrying its conversation over.
+- **switch**: moving a session to other rigs, carrying its conversation over.
 
 ## Requirements
 
@@ -38,29 +38,29 @@ The system shall read rig definitions from a user-level file, each naming the
 plugins it loads.
 
 #### `RIG-02`
-Where a rig extends another rig, the system shall load the plugins of that
-rig, and of the rig it extends in turn, along with its own.
+The system shall load the base rig's plugins in every launch, along with the
+plugins of each rig the launch names.
 
 #### `RIG-03`
-If the rigs a rig extends form a cycle, then the system shall refuse the
-launch, naming the rigs in the cycle.
+When a launch names several rigs, separated by spaces, commas, or both, the
+system shall load the plugins of all of them.
 
 #### `RIG-04`
-When a launch uses a rig, the system shall start Claude Code with that rig's
+When a launch uses rigs, the system shall start Claude Code with their
 plugins enabled for that session, setting no other plugin's state apart from
 pins, so a plugin enabled during the session loads.
 
 #### `RIG-05`
-When the user runs `rig use <name>`, the system shall launch Claude Code with
-the named rig.
+When the user runs `rig use <rig>...`, the system shall launch Claude Code with
+the base rig and the named rigs.
 
 #### `RIG-06`
-When a launch names no rig, the system shall launch Claude Code with the
-default rig.
+When a launch names no rig, the system shall launch Claude Code with the base
+rig and the default rigs.
 
 #### `RIG-07`
-When the user runs `rig list`, the system shall list each rig with its plugins
-and the rig it extends.
+When the user runs `rig list`, the system shall list each rig with its plugins,
+marking the base rig and the default rigs.
 
 #### `RIG-08`
 If a rig names a plugin that is not installed, then the system shall list it
@@ -72,16 +72,25 @@ If a rig names a plugin that is not installed and no one is at a terminal to
 confirm, then the system shall refuse the launch, naming the plugin.
 
 #### `RIG-10`
-If a rig extends more than one rig, then the system shall refuse the launch,
-naming the rig.
+The system shall provide a rig named `full` that loads every installed plugin.
 
 #### `RIG-11`
-If more than one rig extends no other rig, then the system shall refuse the
-launch, naming those rigs.
+If the rig definitions give a rig anything but plugins, define a rig named
+`full`, or define no rig named `base`, then the system shall refuse the launch,
+saying which.
+
+#### `RIG-13`
+When the user runs `rig list --json`, the system shall print the rigs, their
+plugins, and the default rigs as JSON.
+
+#### `RIG-14`
+When the user runs `rig list --graph`, the system shall print a table of
+plugins against rigs, marking each rig that loads each plugin, listing the
+installed plugins no rig names after the rest.
 
 #### `RIG-12`
 When a launch starts, the system shall turn off each plugin the user's Claude
-Code settings file enables, naming the ones the rig doesn't include.
+Code settings file enables, naming the ones the launch's rigs don't include.
 
 ### `SETUP`
 First-run setup
@@ -96,21 +105,26 @@ with the plugins Claude Code's settings enable already selected.
 
 #### `SETUP-03`
 When the user saves first-run setup, the system shall write the base rig to the
-rig definitions as the default rig.
+rig definitions.
 
 #### `SETUP-04`
-While the rig editor is open, the system shall show a draft rig, extending the
-base rig, for each group of enabled plugins that no rig loads, saving a
-draft only once the user keeps it under a name.
+While the rig editor is open, the system shall show a draft rig for each group
+of installed plugins that no rig names, whether the settings turn them on or
+off, saving a draft only once the user keeps it under a name.
 
 #### `SETUP-04a`
 Where the `enabledPlugins` block of the user's Claude Code settings file
 separates its entries into groups with blank lines, the system shall make one
-draft rig per group.
+draft rig per group, counting entries that are on and off alike, and suggest a
+name: the plugin's own for a group of one, else the start the plugins' names
+share, else their marketplace, else the first plugin's name, unique among the
+rigs and drafts.
 
 #### `SETUP-04b`
-Where the `enabledPlugins` block has no blank-line groups, the system shall
-make one draft rig per marketplace, named after the marketplace.
+Where the `enabledPlugins` block has no blank-line groups, or doesn't list an
+installed plugin, the system shall put those plugins in one draft rig per
+marketplace, named after the marketplace, or after the plugin when it holds
+one.
 
 #### `SETUP-05`
 When the user runs `rig setup`, the system shall open the rig editor on the
@@ -124,33 +138,37 @@ system shall refuse the launch, naming `rig setup`.
 Rig editor
 
 #### `EDITOR-01`
-The rig editor shall show the rigs in one pane as a tree rooted at the base
-rig, each rig appearing once, under the rig it extends, and the plugins of the
-selected rig in a second pane.
+The rig editor shall list the rigs in one pane, the base rig first, the other
+rigs and drafts after it, and `full` last, joined by a bracket, marking the
+base rig and `full` as built in, with the plugins of the selected rig in a
+second pane.
 
 #### `EDITOR-02`
 The rig editor shall offer every installed plugin, and every plugin a rig
-names, as a candidate for the selected rig.
+names, as a candidate for the selected rig, and show `full` with every
+installed plugin locked.
 
 #### `EDITOR-03`
 The rig editor shall move through rigs and plugins with the arrow keys or the
 mouse, and toggle the highlighted plugin with space or a click.
 
 #### `EDITOR-04`
-The rig editor shall show the plugins the selected rig inherits as included and
-locked, naming the rig each comes from.
+The rig editor shall show every rig other than the base rig as the base rig's
+plugins in a box of their own, then `+`, then the rig's own box, and when the
+user toggles a plugin in the base rig's box, move it into the rig.
 
 #### `EDITOR-05`
-When the user creates a rig or changes the rig a rig extends, the system shall
-require one rig to extend, offering only the rigs that would not form a cycle.
+When the user creates a rig, the system shall ask for its name, refusing a
+name another rig has.
 
 #### `EDITOR-06`
-When the user marks a rig as the default, the system shall make it the rig a
-launch uses when it names none.
+When the user marks a rig as a default, the system shall add it to the rigs a
+launch naming no rig uses, or take it out when it is one already, showing the
+rigs such a launch loads.
 
 #### `EDITOR-07`
-If the user deletes the base rig, the default rig, or a rig that other rigs
-extend, then the system shall refuse, saying which.
+If the user deletes or renames the base rig or `full`, then the system shall
+refuse, saying why.
 
 #### `EDITOR-08`
 When the user saves, the system shall write the rigs to the rig definitions
@@ -159,21 +177,30 @@ plugins in alphabetical order.
 
 #### `EDITOR-09`
 If the user quits the rig editor with unsaved changes, then the system shall
-ask whether to save them, with saving as the default choice and discarding as
-the other.
+ask whether to save them, `q` saving and quitting, `d` discarding, and escape
+going back to the editor.
 
 #### `EDITOR-10`
-When the user double-clicks a rig or a draft, or presses enter on it, the
-system shall open it for naming, and for choosing the rig it extends unless it
-is the base rig.
+When the user presses F2 on a rig or double-clicks it, or presses `s` on a
+draft or double-clicks it, the system shall open it for naming.
 
 #### `EDITOR-11`
-When the user renames a rig, the system shall carry the new name to the rigs
-that extend it and to the default.
+When the user renames a rig, the system shall carry the new name to the
+default rigs.
 
 #### `EDITOR-12`
-The rig editor shall list the rigs that extend each rig in alphabetical order,
-re-sorting them as rigs are created, renamed, or moved.
+The rig editor shall list the rigs between the base rig and `full` in
+alphabetical order, re-sorting them as rigs are created or renamed.
+
+#### `EDITOR-13`
+When the user presses `>` on a plugin with a rig other than the base rig
+selected, the system shall put the plugin in that rig and take it off the base
+rig, and when the user presses `<` on a plugin, put it on the base rig and take
+it out of the selected rig.
+
+#### `EDITOR-14`
+When the user presses `x` on a draft, the system shall dismiss it, and stop
+offering its plugins as a draft once the rigs are saved.
 
 ### `PIN`
 Local pins
@@ -206,15 +233,15 @@ When an interactive launch starts inside a pinned checkout, the system shall
 offer that pin on the launch confirmation, selected.
 
 #### `PIN-08`
-When a launch's rig includes a pinned plugin, the system shall load the pinned
+When a launch's rigs include a pinned plugin, the system shall load the pinned
 checkout in place of the installed copy.
 
 #### `PIN-09`
-When an interactive launch's rig does not include a pinned plugin, the system
+When an interactive launch's rigs do not include a pinned plugin, the system
 shall offer that pin on the launch confirmation, unselected.
 
 #### `PIN-10`
-If a launch's rig does not include a pinned plugin and no one is at a terminal
+If a launch's rigs do not include a pinned plugin and no one is at a terminal
 to ask, then the system shall launch without that pin.
 
 #### `PIN-11`
@@ -239,7 +266,7 @@ The system shall pass every argument it does not consume to Claude Code
 unchanged.
 
 #### `LAUNCH-02`
-When a launch starts, the system shall print the rig, the pins, and the sandbox
+When a launch starts, the system shall print the rigs, the pins, and the sandbox
 state before Claude Code starts.
 
 #### `LAUNCH-03`
@@ -253,9 +280,9 @@ Claude Code with the arguments unchanged, without loading a rig.
 
 #### `LAUNCH-05`
 When an interactive launch has a plugin to install or a pin to choose, the
-system shall show one launch confirmation: the rig and its plugins, read-only,
-then the pins the rig leaves to choose, launching on enter and refusing the
-launch on escape.
+system shall show one launch confirmation: the rigs, which the user can add to
+or take from, the plugins they load, and the pins they leave to choose,
+launching on enter and refusing the launch on `q`.
 
 #### `LAUNCH-06`
 While an interactive launch runs, the system shall stay running until Claude
@@ -266,19 +293,19 @@ exit status.
 Switching rigs mid-session
 
 #### `SWITCH-01`
-When the user runs `/rig:switch <rig>` in a session rig launched at a
+When the user runs `/rig:switch <rig>...` in a session rig launched at a
 terminal, the system shall record the switch and tell the user to exit Claude
 Code.
 
 #### `SWITCH-02`
 When Claude Code exits after a recorded switch, the system shall launch the
-named rig resuming the same conversation, with the launch's sandbox state, and
+named rigs resuming the same conversation, with the launch's sandbox state, and
 offer pins as any launch does.
 
 #### `SWITCH-03`
-If the user runs `/rig:switch <rig>` in a session rig did not launch at a
+If the user runs `/rig:switch <rig>...` in a session rig did not launch at a
 terminal, then the system shall refuse the switch, naming the command that
-resumes the conversation with that rig.
+resumes the conversation with those rigs.
 
 #### `SWITCH-04`
 If `/rig:switch` names a rig that isn't defined, then the system shall refuse
@@ -286,7 +313,7 @@ the switch, naming the rigs.
 
 #### `SWITCH-05`
 When the user runs `/rig:switch` naming no rig, the system shall list the rigs,
-marking the one the session uses.
+marking the ones the session uses.
 
 ### `SHELL`
 Shell integration
@@ -308,8 +335,9 @@ Where no other shell function defines `claude`, the install shall make `claude`
 run `rig claude`.
 
 #### `SHELL-05`
-When the user runs `rig` with no arguments, the system shall print its usage
-without launching Claude Code.
+When the user runs `rig` with no arguments, the system shall open first-run
+setup when no rigs are defined and someone is at a terminal, and print its usage
+otherwise, without launching Claude Code.
 
 #### `SHELL-06`
 When the user runs `rig claude`, the system shall treat the arguments that
@@ -327,8 +355,8 @@ Where `claude` runs rig, the system shall complete `claude` as it completes
 `rig`, also offering `rig` as the first argument.
 
 #### `TAB-03`
-When the user completes the argument after `rig use`, the system shall offer
-the names of the rigs.
+When the user completes an argument of `rig use` that follows only rig names,
+the system shall offer the names of the rigs, `full` among them.
 
 #### `TAB-04`
 When the user completes an argument of `rig pin`, the system shall offer the

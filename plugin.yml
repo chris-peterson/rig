@@ -34,7 +34,7 @@ suite:
   # >>> shipyard:describe — generated from source by `shipyard gen-describe`; do not edit >>>
   describe:
     skills:
-      switch: Switch this session to another rig, keeping the conversation.
+      switch: Switch this session to other rigs, keeping the conversation.
     hooks:
       cli-freshness: SessionStart — Tells you to run /rig:install-rig when the rig command on PATH runs an outdated install.
       hooks: 'Hook wiring: SessionStart→cli-freshness.'

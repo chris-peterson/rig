@@ -30,7 +30,7 @@ STAND_IN = textwrap.dedent('''\
             settings = json.loads(args.pop(0))
             on = sorted(k for k, v in settings["enabledPlugins"].items() if v)
             off = sorted(k for k, v in settings["enabledPlugins"].items() if not v)
-            shown.append(f"--settings  enabled: {{', '.join(on)}}; off: {{', '.join(off)}}"
+            shown.append("--settings  enabled: " + ", ".join(on) + ("; off: " + ", ".join(off) if off else "")
                          + ("; sandbox on" if "sandbox" in settings else ""))
         elif arg == "--plugin-dir":
             shown.append(f"--plugin-dir {{args.pop(0)}}")
@@ -40,13 +40,13 @@ STAND_IN = textwrap.dedent('''\
     ''')
 
 RIGS = """\
-default: base
 rigs:
   base:
     plugins: [anchor@acme, beacon@acme]
   web:
-    extends: base
     plugins: [frontend-design@acme]
+  ops:
+    plugins: [tack@acme]
 """
 
 
@@ -74,10 +74,12 @@ def main() -> None:
             subprocess.run([sys.executable, str(RIG), *args], env=env, cwd=home, stdin=subprocess.DEVNULL,
                            stderr=subprocess.STDOUT)
 
-        print("A throwaway HOME with four installed plugins and two rigs. The stand-in claude prints its arguments.")
+        print("A throwaway HOME with four installed plugins and three rigs. The stand-in claude prints its arguments.")
         step("the rigs", "list")
-        step("plain launch: the default rig only, everything else off", "-p", "hi")
-        step("a named rig adds its plugins to the ones it extends", "use", "web", "-p", "hi")
+        step("plain launch: the base rig only", "-p", "hi")
+        step("a named rig adds its plugins to the base rig's", "use", "web", "-p", "hi")
+        step("several rigs at once", "use", "web,ops", "-p", "hi")
+        step("full: every installed plugin", "use", "full", "-p", "hi")
         step("pin a local checkout of anchor", "pin", "src/anchor")
         step("the rig includes anchor, so the checkout stands in for the installed copy", "-p", "hi")
         step("--sandbox turns the sandbox on for one launch", "use", "web", "--sandbox", "-p", "hi")
