@@ -1,6 +1,6 @@
 {
   "name": "rig",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Launch Claude Code with a named set of plugins, your local plugin checkouts pinned in, and the sandbox when you want it.",
   "author": {
     "name": "chris-peterson"

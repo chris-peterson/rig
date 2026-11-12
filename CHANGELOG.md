@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0
 
 - `claude` launches Claude Code with the base rig and your default rigs, and
   `rig use web infra` with the base rig and the rigs you name (`web,infra`
