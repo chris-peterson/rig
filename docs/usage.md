@@ -51,7 +51,7 @@ installed. Pins (below) load with them.
 ```bash
 claude                      # base plus your default rigs
 rig use infra               # base plus infra
-rig use entsvc infra        # base plus both; `entsvc,infra` and "entsvc infra" work too
+rig use web infra           # base plus both; `web,infra` and "web infra" work too
 rig use full                # every installed plugin
 claude "fix the bug"        # a prompt, with the default rigs
 rig list                    # every rig and its plugins

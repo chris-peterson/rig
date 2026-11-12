@@ -3,7 +3,7 @@
 ## Unreleased
 
 - `claude` launches Claude Code with the base rig and your default rigs, and
-  `rig use entsvc infra` with the base rig and the rigs you name (`entsvc,infra`
+  `rig use web infra` with the base rig and the rigs you name (`web,infra`
   works too); `full` is every installed plugin. Those plugins are enabled for
   that session. Each launch turns off the plugins your
   `~/.claude/settings.json` enables, so `/plugin enable` works mid-session and
