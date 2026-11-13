@@ -19,6 +19,8 @@ below its category's heading, so every requirement has a linkable anchor
 - **base rig**: the rig named `base`, which every launch loads. First-run setup
   creates it from the plugins you want in every session.
 - **full**: a rig that rig provides, holding every installed plugin.
+- **none**: a preset that rig provides, launching stock Claude Code with no
+  plugins at all.
 - **default rigs**: the rigs a launch adds to the base rig when it names none.
 - **pin**: a local plugin checkout that stands in for the plugin's installed
   copy, so changes to the checkout can be used for a stretch of real work
@@ -76,8 +78,8 @@ The system shall provide a rig named `full` that loads every installed plugin.
 
 #### `RIG-11`
 If the rig definitions give a rig anything but plugins, define a rig named
-`full`, or define no rig named `base`, then the system shall refuse the launch,
-saying which.
+`full` or `none`, or define no rig named `base`, then the system shall refuse
+the launch, saying which.
 
 #### `RIG-13`
 When the user runs `rig list --json`, the system shall print the rigs, their
@@ -86,7 +88,20 @@ plugins, and the default rigs as JSON.
 #### `RIG-14`
 When the user runs `rig list --graph`, the system shall print a table of
 plugins against rigs, marking each rig that loads each plugin, listing the
-installed plugins no rig names after the rest.
+installed plugins no rig names after the rest, then any pinned plugin neither
+lists.
+
+#### `RIG-15`
+When a launch names `none`, the system shall start Claude Code with every
+plugin it knows of turned off, the base rig's and pinned plugins' included.
+
+#### `RIG-16`
+When a launch names `none`, the system shall say what the session goes without
+and launch only once the user at the terminal confirms.
+
+#### `RIG-17`
+If a launch names `none` along with other rigs, or no one is at a terminal to
+confirm it, then the system shall refuse the launch.
 
 #### `RIG-12`
 When a launch starts, the system shall turn off each plugin the user's Claude
@@ -250,6 +265,18 @@ inside it, the system shall start Claude Code with
 `CLAUDE_CODE_AUTO_MODE_SERVER=0`, unless the environment already sets it, and
 say so before Claude Code starts.
 
+#### `PIN-12`
+The system shall mark each pinned plugin with 📌 wherever it lists plugins or
+pins: the launch summary, `rig pin`, `rig list`, the graph, the picker, the
+launch confirmation, and the rig editor.
+
+#### `PIN-13`
+When the user toggles a pinned plugin's row in the picker, the system shall
+show the pin's checkout, when it was pinned, and whether it loads, unpinning it
+on enter or Unpin, taking the plugin out of the launch or putting it in on a
+second button, loading the checkout or skipping it on a third, and closing on
+escape or a click on its ✕.
+
 ### `SANDBOX`
 Sandbox
 
@@ -288,6 +315,44 @@ launching on enter and refusing the launch on `q`.
 While an interactive launch runs, the system shall stay running until Claude
 Code exits, leaving Ctrl-C to Claude Code, and then exit with Claude Code's
 exit status.
+
+#### `LAUNCH-07`
+Where a launch passes `--select`, the system shall first show a picker headed
+with the command line that opened it: the plugins against the rigs as
+`rig list --graph` shows them, with `full` among the rigs, each row on one line,
+marking under each rig whether the launch loads it whole or in part, with one
+cursor on a rig's name or a plugin's row that the arrow keys and tab move,
+toggling what the cursor is on with space or enter as a click on it does, a
+rig other than the base rig toggling on a click on its name, launching on `l`,
+Shift+Enter, or a click on the footer's 🚀, and refusing the launch on `q`.
+
+#### `LAUNCH-09`
+When the user chooses `full` in the picker, the system shall take away the other
+rigs chosen, and when the user chooses another rig, take away `full`.
+
+#### `LAUNCH-10`
+When the user presses `e` in the picker, the system shall open the rig editor,
+then reopen the picker on the edited rigs, keeping the rigs chosen that still
+exist.
+
+#### `LAUNCH-11`
+When the user toggles a plugin with no pin in the picker, or chooses to on a
+pinned plugin's dialog, the system shall take that plugin out of the launch, or put it in,
+whatever rigs hold it, marking each rig the launch then loads only part of as partly loaded,
+explaining that mark only while some rig carries it, and naming the plugins
+picked and taken out after the rigs.
+
+#### `LAUNCH-08`
+If a launch passes `--select` and no one is at a terminal, then the system
+shall refuse the launch.
+
+#### `LAUNCH-12`
+When a launch's rigs include `full`, the system shall describe it as all of its
+plugins, naming the ones taken out, in place of the rigs.
+
+#### `LAUNCH-13`
+The picker shall end its footer with a 🚀 launch item, animated unless
+Textual's animations are off, that launches on a click.
 
 ### `SWITCH`
 Switching rigs mid-session
@@ -356,7 +421,9 @@ Where `claude` runs rig, the system shall complete `claude` as it completes
 
 #### `TAB-03`
 When the user completes an argument of `rig use` that follows only rig names,
-the system shall offer the names of the rigs, `full` among them.
+or a rig name after rig names joined by commas, the system shall offer the rigs
+not yet named apart from the base rig, `full` among them, and `none` when
+nothing is named yet.
 
 #### `TAB-04`
 When the user completes an argument of `rig pin`, the system shall offer the
@@ -368,7 +435,8 @@ When the user completes an argument of `rig unpin`, the system shall offer the
 pinned plugins.
 
 #### `TAB-06`
-When the user completes a flag of a launch, the system shall offer `--sandbox`.
+When the user completes a flag of a launch, the system shall offer `--sandbox`
+and `--select`.
 
 ### `DOCTOR`
 Doctor

@@ -20,7 +20,7 @@ import time
 import unittest
 from pathlib import Path
 
-KEYS = {"space": b" ", "tab": b"\t", "enter": b"\r", "escape": b"\x1b", "down": b"\x1b[B", "s": b"s", "q": b"q", "d": b"d"}
+KEYS = {"space": b" ", "tab": b"\t", "enter": b"\r", "escape": b"\x1b", "down": b"\x1b[B", "s": b"s", "q": b"q", "d": b"d", "e": b"e", "x": b"x", "l": b"l"}
 ALT_SCREEN = b"\x1b[?1049h"
 
 REPO = Path(__file__).resolve().parent.parent
@@ -82,6 +82,7 @@ class RigCase(unittest.TestCase):
             "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
             "RIG_TEST_ARGV": str(self.argv_log),
             "TERM": "xterm-256color",
+            "TEXTUAL_ANIMATIONS": "none",
         }
 
     def tearDown(self):
@@ -202,10 +203,11 @@ class Rigs(RigCase):
     def test_rig_10_full_loads_every_installed_plugin(self):
         result = self.rig("use", "full", "-p", "hi")
         self.assertEqual(self.enabled_sets(), [{"a@m", "b@m", "c@n", "d@n"}])
-        self.assertIn("rig: base + full, 4 plugins", result.stderr)
+        self.assertIn("rig: all 4 plugins", result.stderr)
 
     def test_rig_11_rig_definitions_out_of_shape_refused(self):
         cases = {
+            "rigs:\n  base: {plugins: []}\n  none: {plugins: []}\n": "defines a rig named none",
             "rigs:\n  base: {plugins: []}\n  web: {extends: base, plugins: []}\n": "Take out anything else, such as `extends`",
             "rigs:\n  base: {plugins: [], sandbox: true}\n": "a rig holds only `plugins`",
             "rigs:\n  base: {plugins: []}\n  full: {plugins: []}\n": "defines a rig named full",
@@ -297,6 +299,29 @@ class Rigs(RigCase):
             c@n      ·     ●
             d@n      ·     ·
             """))
+
+    def test_rig_17_none_refused_headless_and_alongside_other_rigs(self):
+        result = self.rig("use", "none", "-p", "hi")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("needs someone at a terminal to confirm it", result.stderr)
+        status, output = self.rig_tty("use", "none", "web", answers="y\n")
+        self.assertNotEqual(status, 0)
+        self.assertIn("none launches Claude Code with no plugins, so it goes alone", output)
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_rig_16_none_launches_once_confirmed(self):
+        self.write_settings(self.home / "proj", {"p@n": True})
+        status, output = self.rig_tty("use", "none", answers="n\n")
+        self.assertNotEqual(status, 0)
+        self.assertIn("Launch with no plugins? [y/N]", output)
+        self.assertEqual(self.claude_calls(), [])
+        status, output = self.rig_tty("use", "none", "--sandbox", answers="y\n", cwd=self.home / "proj")
+        self.assertEqual(status, 0, output)
+        self.assertIn("rig: none, no plugins", output)
+        settings, rest = self.launched()
+        self.assertEqual(settings["enabledPlugins"], dict.fromkeys(["a@m", "b@m", "c@n", "d@n", "p@n"], False))
+        self.assertTrue(settings["sandbox"]["enabled"])
+        self.assertEqual(rest, [])
 
     def test_rig_09_missing_plugin_refused_headless(self):
         self.write_installed("a@m")
@@ -745,7 +770,7 @@ class Pins(RigCase):
 
     def test_pin_06_bare_pin_lists_with_age(self):
         self.rig("pin", str(self.ckout))
-        self.assertRegex(self.rig("pin").stdout, r"^b  ~/src/b  \(pinned just now\)\n$")
+        self.assertRegex(self.rig("pin").stdout, r"^📌 b  ~/src/b  \(just now\)\n$")
 
     def test_pin_07_pin_holding_cwd_can_be_left_out(self):
         self.rig("pin", str(self.ckout))
@@ -761,7 +786,7 @@ class Pins(RigCase):
         overlay, args = self.launched()
         self.assertEqual(args[:2], ["--plugin-dir", str(self.ckout.resolve())])
         self.assertIs(overlay["enabledPlugins"]["b@m"], False)
-        self.assertIn("pins: b  ~/src/b  (pinned just now)", result.stderr)
+        self.assertIn("\n📌 b  ~/src/b  (just now)\n", result.stderr)
 
     def test_pin_11_pin_holding_cwd_turns_auto_mode_server_off(self):
         self.rig("pin", str(self.ckout))
@@ -811,7 +836,44 @@ class Pins(RigCase):
         self.rig("pin", str(self.checkout("x")))
         result = self.rig("-p", "hi")
         self.assertNotIn("--plugin-dir", self.launched()[1])
-        self.assertIn("(pinned just now, not loaded)", result.stderr)
+        self.assertIn("📌 x  ~/src/x  (just now, not loaded)", result.stderr)
+
+    def test_pin_12_list_and_graph_mark_pinned_plugins(self):
+        self.rig("pin", str(self.ckout))
+        self.assertIn("  plugins: a@m, b@m 📌\n", self.rig("list").stdout)
+        self.assertEqual(self.rig("list", "--graph").stdout, textwrap.dedent("""\
+            plugin  base  web
+            a@m      ●     ·
+            b@m 📌   ●     ·
+            c@n      ·     ●
+            x@n      ·     ·
+            """))
+
+    def test_launch_07_select_needs_a_terminal(self):
+        result = self.rig("--select", "-p", "hi")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--select opens a picker, so it needs a terminal", result.stderr)
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_launch_07_select_picks_rigs_before_launching(self):
+        status, output = self.rig_tty("--select", "--", "hi", keys=["space", "l"])
+        self.assertEqual(status, 0, output)
+        self.assertIn("rig: base + web, 3 plugins", output)
+        self.assertNotIn("--select", self.launched()[1])
+        self.assertEqual(self.launched()[1], ["--", "hi"])
+
+    def test_launch_11_plugins_picked_on_their_own(self):
+        status, output = self.rig_tty("--select", "--", "hi", keys=["down", "enter", "down", "down", "down", "enter", "l"])
+        self.assertEqual(status, 0, output)
+        self.assertIn("rig: base + x@n - a@m, 2 plugins", output)
+        self.assertEqual(self.launched()[0]["enabledPlugins"], {"a@m": False, "b@m": True, "x@n": True})
+
+    def test_launch_07_e_opens_the_editor_then_the_picker_again(self):
+        status, output = self.rig_tty("--select", "--", "hi", keys=["space", "e", "q", "l"])
+        self.assertEqual(status, 0, output)
+        self.assertIn("rig setup", output)
+        self.assertIn("rig: base + web, 3 plugins", output)
+        self.assertEqual(self.launched()[1], ["--", "hi"])
 
     def test_tab_unpin_names_read_from_pins_file(self):
         self.rig("pin", str(self.ckout))
@@ -855,7 +917,7 @@ class Sandbox(RigCase):
     def test_launch_02_sandbox_off_line(self):
         result = self.rig("-p", "hi")
         self.assertNotIn("sandbox", self.launched()[0])
-        self.assertTrue(result.stderr.endswith("pins: none\nsandbox: off\n"), result.stderr)
+        self.assertTrue(result.stderr.endswith("📌 none\nsandbox: off\n"), result.stderr)
 
 
 GROUPED_SETTINGS = """{
@@ -1311,6 +1373,14 @@ class Editor(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertEqual(self.options(app), [(p, True, True) for p in self.NAMED])
 
+    async def test_pin_12_editor_marks_pinned_plugins(self):
+        app, running = self.running(self.rig.RigEdits(three_rigs(), self.NAMED, [], self.NAMED, {"b"}))
+        async with running as pilot:
+            await pilot.pause()
+            listing = app.screen.query_one("#plugins")
+            prompts = [str(listing.get_option_at_index(i).prompt) for i in range(listing.option_count)]
+            self.assertEqual(prompts, ["a@m", "b@m 📌", "c@n", "d@n"])
+
     async def test_setup_04_draft_kept_from_the_editor(self):
         edits = self.rig.RigEdits(None, ENABLED, [], INSTALLED)
         app, running = self.running(edits)
@@ -1497,7 +1567,7 @@ class LaunchConfirmation(unittest.IsolatedAsyncioTestCase):
                              [("base", True, True), ("web", True, False), ("full", False, False)])
             self.assertEqual(app.query_one("#plugins").border_title, "base + web: 4 plugins")
             self.assertIn("a@m  from base", self.shown(app))
-            self.assertIn("inrig@m  from base  pinned at /src/inrig", self.shown(app))
+            self.assertIn("inrig@m  from base  📌 /src/inrig", self.shown(app))
             self.assertIn("z@m  from web  not installed; installs at launch", self.shown(app))
             await pilot.press("enter")
         self.assertEqual(app.return_value[0], ["web"])
@@ -1533,7 +1603,7 @@ class LaunchConfirmation(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one("#pins").selected, [1, 2])
             await pilot.press("down", "space")
             await pilot.pause()
-            self.assertEqual(app.query_one("#plugins").border_title, "base + full: 4 plugins")
+            self.assertEqual(app.query_one("#plugins").border_title, "all 4 plugins")
             self.assertIn("outside@m  from full", self.shown(app))
             self.assertNotIn("z@m", self.shown(app))
             await pilot.press("enter")
@@ -1541,6 +1611,323 @@ class LaunchConfirmation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.choices(app), {"inrig": True, "here": True, "outside": True})
 
     async def test_launch_05_q_cancels(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("q")
+        self.assertIsNone(app.return_value)
+
+
+class Picker(unittest.IsolatedAsyncioTestCase):
+    """The --select picker on screen, driven by keys and clicks."""
+
+    rig = load_rig()
+    RIGS = {"base": {"plugins": ["a@m", "inrig@m"]}, "web": {"plugins": ["here@m", "z@m"]}}
+    INSTALLED = ["a@m", "here@m", "inrig@m", "outside@m"]
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._home = os.environ.get("HOME")
+        os.environ["HOME"] = self._tmp.name
+
+    def tearDown(self):
+        os.environ["HOME"] = self._home
+        self._tmp.cleanup()
+
+    def running(self, selected=("web",)):
+        pin = lambda name: {"plugin": name, "path": f"/src/{name}", "pinned_at": "2026-01-01T00:00:00+00:00"}
+        pins = [pin("inrig"), pin("here"), pin("outside")]
+        self.rig.write_pins(pins)
+        plan_for = lambda names, *picks: self.rig.plan(names, self.RIGS, set(self.INSTALLED), pins, Path("/src/here"), *picks)
+        columns = [{"name": name, "default": name == "web",
+                    "plugins": self.INSTALLED if name == "full" else self.RIGS[name]["plugins"]}
+                   for name in self.rig.rig_order(self.RIGS)]
+        app = self.rig.select_app(plan_for, columns, self.INSTALLED, pins, plan_for(list(selected)), False)
+        self.layout = app.LAYOUT
+        return app, app.run_test(size=(110, 30))
+
+    def summary(self, app) -> str:
+        return str(app.query_one("#summary").render())
+
+    def lines(self, app) -> list[str]:
+        return [line.rstrip() for line in str(app.query_one("#graph").render()).splitlines()]
+
+    def choices(self, app) -> dict[str, bool]:
+        return {pin["plugin"]: load for pin, load in app.return_value[1]}
+
+    def x_of(self, column: int) -> int:
+        """A terminal column inside the graph's column: -1 the plugin's name, 0.. a rig."""
+        at = 0
+        for text, piece in self.layout.header():
+            if piece == column and text.strip():
+                return at + 1
+            at += self.rig.cells(text)
+
+    async def test_launch_07_the_graph_with_full_and_the_pins(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            lines = self.lines(app)
+            self.assertEqual(lines, ["plugin        base  ★web  full",
+                                     "               ✓     ✓            ★ = default  ✓ = loads",
+                                     "a@m            ●     ·     ●",
+                                     "inrig@m 📌     ●     ·     ●",
+                                     "here@m 📌      ·     ●     ●",
+                                     "z@m            ·     ●     ·    installs at launch",
+                                     "outside@m 📌   ·     ·     ●"])
+            self.assertEqual(lines[0], self.layout.text().splitlines()[0])
+            self.assertEqual(self.summary(app), "base + web: 4 plugins")
+            await pilot.press("l")
+        self.assertEqual(app.return_value[0], ["web"])
+        self.assertEqual(self.choices(app), {"inrig": True, "here": True, "outside": False})
+
+    async def test_launch_07_header_names_the_command_and_rows_never_wrap(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            self.assertEqual(app.screen.border_title, "rig --select")
+            await pilot.resize_terminal(40, 30)
+            await pilot.pause()
+            graph = app.query_one("#graph")
+            self.assertEqual(graph.size.width, max(self.rig.cells(line) for line in self.lines(app)))
+            self.assertEqual(graph.size.height, len(self.layout.rows) + 2)
+
+    def test_launch_07_invocation_is_the_command_line_typed(self):
+        argv = sys.argv
+        try:
+            for typed, shown in ((["rig", "--select"], "rig --select"), (["rig", "use", "web", "--select"], "rig use web --select"),
+                                 (["rig", "claude", "--select"], "claude --select")):
+                sys.argv = typed
+                self.assertEqual(self.rig.invocation(), shown)
+        finally:
+            sys.argv = argv
+
+    async def test_launch_07_tab_runs_across_the_rigs(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            graph = app.query_one("#graph")
+            await pilot.press("tab")
+            self.assertEqual(graph.column, 2)
+            await pilot.press("tab")
+            self.assertEqual(graph.column, 1)
+            await pilot.press("shift+tab")
+            self.assertEqual(graph.column, 2)
+            self.assertIs(app.focused, graph)
+
+    async def test_launch_07_keys_toggle_rigs_and_never_reach_base(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("space", "right", "space")
+            self.assertEqual(self.summary(app), "all 4 plugins")
+            await pilot.press("left", "left", "left", "space")
+            self.assertEqual(self.summary(app), "base + web: 4 plugins")
+            self.assertEqual(app.query_one("#graph").column, 1)
+            await pilot.press("l")
+        self.assertEqual(app.return_value[0], ["web"])
+
+    async def test_launch_07_full_goes_alone(self):
+        app, running = self.running(selected=("web",))
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.click("#graph", offset=(self.x_of(2), 0))
+            self.assertEqual(self.summary(app), "all 4 plugins")
+            await pilot.click("#graph", offset=(self.x_of(1), 0))
+            self.assertEqual(self.summary(app), "base + web: 4 plugins")
+            await pilot.press("l")
+        self.assertEqual(app.return_value[0], ["web"])
+
+    async def test_launch_07_a_click_on_base_toggles_nothing(self):
+        app, running = self.running(selected=())
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.click("#graph", offset=(self.x_of(0), 0))
+            self.assertEqual(self.summary(app), "base: 2 plugins")
+            await pilot.press("l")
+        self.assertEqual(app.return_value[0], [])
+
+    async def test_launch_11_a_click_on_a_row_picks_or_drops_its_plugin(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.click("#graph", offset=(self.x_of(-1), 6))
+            await pilot.click("#toggle")
+            self.assertEqual(self.summary(app), "base + web + outside@m: 5 plugins")
+            self.assertEqual([app.state(c) for c in range(3)], ["on", "on", "off"])
+            await pilot.click("#graph", offset=(self.x_of(0), 2))
+            self.assertEqual(self.summary(app), "base + web + outside@m - a@m: 4 plugins")
+            self.assertEqual(app.state(0), "partial")
+            self.assertEqual(self.lines(app)[1].split()[:2], ["◐", "✓"])
+            await pilot.press("l")
+        self.assertEqual(app.return_value[2:], (["outside@m"], ["a@m"]))
+
+    async def test_launch_11_a_partly_loaded_rig_comes_in_whole(self):
+        app, running = self.running(selected=())
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.click("#graph", offset=(self.x_of(-1), 4))
+            await pilot.click("#toggle")
+            self.assertEqual(self.summary(app), "base + here@m: 3 plugins")
+            self.assertEqual(app.state(1), "partial")
+            await pilot.click("#graph", offset=(self.x_of(1), 0))
+            self.assertEqual(self.summary(app), "base + web: 4 plugins")
+            await pilot.press("down", "enter", "left", "space")
+            self.assertEqual(self.summary(app), "base - a@m: 1 plugin")
+            await pilot.click("#graph", offset=(self.x_of(0), 0))
+            self.assertEqual(self.summary(app), "base: 2 plugins")
+            await pilot.press("l")
+        self.assertEqual(app.return_value[2:], ([], []))
+
+    async def test_pin_13_the_dialog_loads_or_skips_the_checkout(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("down", "down", "down", "enter")
+            await pilot.pause()
+            self.assertEqual(str(app.screen.query_one("#pin-load").label), "Skip checkout")
+            await pilot.click("#pin-load")
+            await pilot.press("down", "down", "enter")
+            await pilot.pause()
+            await pilot.click("#pin-load")
+            await pilot.press("up", "up", "up", "enter")
+            await pilot.pause()
+            self.assertEqual(len(app.screen.query("#pin-load")), 0)
+            await pilot.press("escape", "l")
+        self.assertEqual(self.choices(app), {"inrig": True, "here": False, "outside": True})
+
+    async def test_launch_07_e_leaves_for_the_editor_with_the_rigs_chosen(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("right", "space", "e")
+        self.assertEqual(app.return_value, ("edit", ["full"], [], []))
+
+    async def test_launch_13_the_rocket_at_the_end_of_the_footer_launches(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            rocket, footer = app.query_one("#launch"), app.query_one("Footer")
+            self.assertIn("Launch", str(rocket.render()))
+            self.assertIn("🚀", str(rocket.render()))
+            self.assertEqual(rocket.region.right, footer.region.right + rocket.region.width)
+            self.assertEqual(rocket.region.y, footer.region.y)
+            first = rocket.tick
+            await pilot.pause(0.4)
+            self.assertGreater(rocket.tick, first)
+            # pilot.click measures the screen less its border, so it can't reach the bar on the border's inner edge
+            rocket.on_click()
+            await pilot.pause()
+        self.assertEqual(app.return_value[0], ["web"])
+
+    async def test_launch_11_partly_loaded_named_in_the_legend_only_while_a_rig_is(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            self.assertNotIn("◐ = part", self.lines(app)[1])
+            await pilot.press("down", "enter")
+            self.assertIn("★ = default  ✓ = loads  ◐ = part", self.lines(app)[1])
+            await pilot.press("enter")
+            self.assertNotIn("◐ = part", self.lines(app)[1])
+
+    async def test_pin_13_a_click_on_a_pin_opens_it_and_escape_or_the_x_closes_it(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            pin_x = self.rig.cells("inrig@m ")
+            await pilot.click("#graph", offset=(pin_x, 3))
+            await pilot.pause()
+            self.assertEqual(type(app.screen).__name__, "PinDialog")
+            self.assertEqual(app.focused.id, "unpin")
+            details = str(app.screen.query_one("#pin-details").render())
+            self.assertIn("/src/inrig", details)
+            self.assertIn("in these rigs, so the checkout loads", details)
+            await pilot.press("escape")
+            self.assertNotEqual(type(app.screen).__name__, "PinDialog")
+            await pilot.click("#graph", offset=(pin_x, 3))
+            await pilot.pause()
+            await pilot.click("#pin-close")
+            await pilot.pause()
+            self.assertNotEqual(type(app.screen).__name__, "PinDialog")
+            self.assertEqual(self.summary(app), "base + web: 4 plugins")
+            await pilot.press("l")
+        self.assertEqual(self.choices(app), {"inrig": True, "here": True, "outside": False})
+        self.assertEqual(len(self.rig.read_pins()), 3)
+
+    async def test_pin_13_a_click_anywhere_on_a_pinned_row_opens_it_to_toggle_the_plugin(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.click("#graph", offset=(self.x_of(0), 3))
+            await pilot.pause()
+            self.assertEqual(type(app.screen).__name__, "PinDialog")
+            self.assertEqual(self.summary(app), "base + web: 4 plugins")
+            await pilot.click("#toggle")
+            await pilot.pause()
+            self.assertNotEqual(type(app.screen).__name__, "PinDialog")
+            self.assertEqual(self.summary(app), "base + web - inrig@m: 3 plugins")
+            await pilot.click("#graph", offset=(self.x_of(-1), 2))
+            await pilot.pause()
+            self.assertEqual(self.summary(app), "base + web - inrig@m - a@m: 2 plugins")
+            await pilot.press("l")
+        self.assertEqual(app.return_value[3], ["inrig@m", "a@m"])
+
+    async def test_pin_13_enter_unpins(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.click("#graph", offset=(self.rig.cells("inrig@m "), 3))
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertNotEqual(type(app.screen).__name__, "PinDialog")
+            self.assertEqual(self.lines(app)[3].rstrip(), "inrig@m        ●     ·     ●")
+            self.assertEqual([p["plugin"] for p in self.rig.read_pins()], ["here", "outside"])
+            await pilot.press("l")
+        self.assertEqual(self.choices(app), {"here": True, "outside": False})
+
+    async def test_launch_07_space_and_enter_toggle_what_the_cursor_is_on_and_l_launches(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            graph = app.query_one("#graph")
+            await pilot.press("enter")
+            self.assertEqual(self.summary(app), "base: 2 plugins")
+            await pilot.press("space")
+            self.assertEqual(self.summary(app), "base + web: 4 plugins")
+            await pilot.press("down", "space")
+            self.assertEqual(self.summary(app), "base + web - a@m: 3 plugins")
+            await pilot.press("enter")
+            self.assertEqual(self.summary(app), "base + web: 4 plugins")
+            await pilot.press("space", "right")
+            self.assertEqual((graph.row, graph.column), (-1, 1))
+            await pilot.press("down", "down", "enter")
+            await pilot.pause()
+            self.assertEqual(type(app.screen).__name__, "PinDialog")
+            await pilot.press("l")
+            self.assertIsNone(app.return_value)
+            await pilot.press("escape", "l")
+        self.assertEqual(app.return_value[0], ["web"])
+        self.assertEqual(app.return_value[3], ["a@m"])
+
+    async def test_launch_07_shift_enter_launches(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("shift+enter")
+        self.assertEqual(app.return_value[0], ["web"])
+
+    async def test_launch_07_the_legend_names_only_the_marks_on_screen(self):
+        app, running = self.running()
+        async with running as pilot:
+            await pilot.pause()
+            self.assertTrue(self.lines(app)[1].endswith("★ = default  ✓ = loads"))
+            await pilot.press("space")
+            self.assertTrue(self.lines(app)[1].endswith("★ = default"))
+            await pilot.press("down", "enter")
+            self.assertTrue(self.lines(app)[1].endswith("★ = default  ◐ = part"))
+
+    async def test_launch_07_q_cancels(self):
         app, running = self.running()
         async with running as pilot:
             await pilot.pause()
@@ -1592,6 +1979,46 @@ class CompletionParity(unittest.TestCase):
                 names = subprocess.run(["awk", self.awk_program("_rig_names"), str(path)],
                                        capture_output=True, text=True).stdout.split()
                 self.assertIn(names, (["base", "web"], ["base", "web-dev"]))
+
+    STUBS = textwrap.dedent("""\
+        compadd() {
+          local -a a=("$@")
+          if [[ $a[-2] == -a ]]; then print -rl -- ${(P)a[-1]}; else print -rl -- ${a[$a[(i)--]+1,-1]}; fi
+        }
+        _default() { print -r -- _default }
+        words=("$@"); CURRENT=$#; PREFIX=$words[-1]; IPREFIX=; service=rig
+        _rig
+        print -r -- "IPREFIX=$IPREFIX"
+        """)
+
+    def complete(self, *words: str) -> list[str]:
+        """What `rig <words>` completes to with the cursor at the end of the last word, read through stand-ins
+        for the zsh builtins only a completion widget can call."""
+        script = self.rig.ZSH_COMPLETION.replace('\n_rig "$@"\n', "\n") + self.STUBS
+        result = subprocess.run(["zsh", "-f", "-c", script, "zsh", "rig", *words], capture_output=True, text=True,
+                                env={**os.environ, "HOME": self.home})
+        self.assertEqual(result.stderr, "")
+        return result.stdout.splitlines()
+
+    def test_tab_03_rigs_offered_after_spaces_and_commas(self):
+        with tempfile.TemporaryDirectory() as home:
+            self.home = home
+            (Path(home) / ".rig").mkdir()
+            (Path(home) / ".rig" / "rigs.yml").write_text(textwrap.dedent(BASIC_RIGS) + "  tools:\n    plugins: []\n")
+            self.assertEqual(self.complete("use", ""), ["web", "tools", "full", "none", "IPREFIX="])
+            self.assertEqual(self.complete("use", "none,"), ["IPREFIX=none,"])
+            self.assertEqual(self.complete("use", "web", ""), ["tools", "full", "IPREFIX="])
+            self.assertEqual(self.complete("use", "web,"), ["tools", "full", "IPREFIX=web,"])
+            self.assertEqual(self.complete("use", "base,web,to"), ["tools", "full", "IPREFIX=base,web,"])
+            self.assertEqual(self.complete("use", "web,tools", ""), ["full", "IPREFIX="])
+            self.assertEqual(self.complete("use", "web", "tools", "full,"), ["IPREFIX=full,"])
+            self.assertEqual(self.complete("use", "nope,"), ["_default", "IPREFIX="])
+            self.assertEqual(self.complete("use", "web", "-p", ""), ["_default", "IPREFIX="])
+
+    def test_tab_06_launch_flags(self):
+        with tempfile.TemporaryDirectory() as home:
+            self.home = home
+            self.assertEqual(self.complete("use", "web", "--s"), ["--sandbox", "--select", "IPREFIX="])
 
     def test_zsh_parses_the_completion(self):
         with tempfile.NamedTemporaryFile("w", suffix=".zsh") as f:

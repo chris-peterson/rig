@@ -53,11 +53,50 @@ claude                      # base plus your default rigs
 rig use infra               # base plus infra
 rig use web infra           # base plus both; `web,infra` and "web infra" work too
 rig use full                # every installed plugin
+rig use none                # stock Claude Code, no plugins at all; asks first
+claude --select             # pick the rigs on the graph, then launch
 claude "fix the bug"        # a prompt, with the default rigs
 rig list                    # every rig and its plugins
 rig list --graph            # a table of plugins against rigs
 rig list --json             # the same, for scripts
 ```
+
+`none` is for the times you need Claude Code as it ships: every plugin is off
+for that session, the base rig's and your pins included. Since that also drops
+the hooks and guardrails you're used to, rig says so and asks before it
+launches, and refuses with nobody at a terminal to answer.
+
+`--select` opens a picker before the launch: the `rig list --graph` table with
+`full` added, the rigs across the top and their plugins down the side, a 📌 on
+each pinned plugin. One cursor sits on a rig's name or a plugin's row; the
+arrow keys and tab move it, and space, enter, or a click toggles what it's on.
+A ✓ under a rig's name means the launch loads it (the legend at the end of
+that row says so), and the plugins the launch
+loads stay bright and the rest dim. With `full` chosen the summary reads
+`all 40 plugins`. `base` always loads, so it can't be toggled, and `full` holds
+every other rig's plugins, so choosing it takes the others away and choosing
+another rig takes `full` away.
+
+Toggling a plugin's row launches with one plugin more or less: it comes out of
+the launch even when a rig holds it, or goes in when none does. A rig the
+launch then loads only part of shows a yellow ◐, which the legend explains while
+one does; toggling the rig brings it back in whole. The launch summary
+names those plugins after the rigs:
+`rig: base + web + playwright@acme - sonar@acme`.
+
+Toggling a pinned plugin's row opens its pin instead: its checkout, its age,
+and whether it loads. `enter` (or Unpin) unpins it for this launch and the ones
+after; the other buttons take the plugin out of this launch or put it in, and
+load the checkout or skip it for the installed copy. Escape or the ✕ closes it.
+
+`e` opens the rig editor and brings you back to the picker when you quit it.
+`l`, Shift+Enter, or a click on the 🚀 at
+the right end of the footer launches; `q` cancels. `TEXTUAL_ANIMATIONS=none`
+holds the 🚀's exhaust still. `rig use web --select` starts the picker with
+`web` chosen.
+
+Tab completion offers the rigs after `rig use`, and again after each space or
+comma, leaving out the ones already named.
 
 A plugin you enable during a session with `/plugin enable` loads in that
 session; the next launch turns it off again in `~/.claude/settings.json` and
@@ -180,7 +219,7 @@ state:
 
 ```text
 rig: base + web, 9 plugins
-pins: acme-widget  ~/src/acme-widget  (pinned 3 days ago)
+📌 acme-widget  ~/src/acme-widget  (3 days ago)
 sandbox: off
 ```
 

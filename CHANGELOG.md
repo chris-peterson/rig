@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+- `claude --select` (or `rig use <rig>... --select`) opens a picker before the
+  launch: the `rig list --graph` table with `full` added. One cursor moves over
+  the rig names and plugin rows with the arrow keys and tab, and space, enter,
+  or a click toggles what it's on: a rig (`full` goes alone, and `base` always
+  loads) or a single plugin. A rig you've taken a plugin from, or picked one
+  of, shows a ◐ under its name where a loaded one shows a ✓, and the launch
+  summary names those plugins: `base + web + x@m - a@m`. `e` opens the rig
+  editor and comes back; `l`, Shift+Enter, or the 🚀 at the end of the footer
+  launches, and `q` cancels.
+- Toggling a pinned plugin's row in the picker shows the pin's checkout, its
+  age, and whether it loads, with Unpin as the default and buttons to leave
+  the plugin out of the launch or put it in, and to load the checkout or skip
+  it; escape or the ✕ closes it.
+- `rig use none` launches stock Claude Code with every plugin off, the base
+  rig's and your pins included. It says what you'll go without and asks first,
+  and refuses without a terminal to ask at.
+- A launch with `full` says `all 40 plugins` rather than `base + full`.
+- A 📌 marks pinned plugins in the launch summary, `rig pin`, `rig list`, the
+  graph, the launch confirmation, and the rig editor, in place of the words
+  "pinned" and "pins:".
+- Tab completion for `rig use` offers the rigs again after a comma
+  (`rig use web,<tab>`) and after comma-joined names, leaves out the rigs
+  already named and `base`, and offers `--select` alongside `--sandbox`.
+
 ## 0.1.0
 
 - `claude` launches Claude Code with the base rig and your default rigs, and
