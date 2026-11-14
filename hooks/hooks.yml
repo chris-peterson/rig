@@ -3,3 +3,6 @@ hooks:
   - event: SessionStart
     command: 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/cli-freshness.sh"'
     description: Tells you to run /rig:install-rig when the rig command on PATH runs an outdated install.
+  - event: SessionStart
+    command: 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/beacon-badge.sh"'
+    description: Shows the session's rigs on beacon's pane badge, when beacon is installed.

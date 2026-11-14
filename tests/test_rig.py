@@ -400,8 +400,11 @@ class Switch(RigCase):
         status, output = self.rig_tty("claude", "--sandbox", "fix the bug")
         self.assertEqual(status, 0, output)
         self.assertIn("rig relaunches this conversation with base + web", output)
-        self.assertEqual(self.launches(), [({"a@m", "b@m"}, ["fix the bug"]),
-                                           ({"a@m", "b@m", "c@n"}, ["--resume", "abc"])])
+        (first, first_args), (second, second_args) = self.launches()
+        self.assertEqual((first, first_args), ({"a@m", "b@m"}, ["fix the bug"]))
+        self.assertEqual((second, second_args[:2]), ({"a@m", "b@m", "c@n"}, ["--resume", "abc"]))
+        self.assertEqual(len(second_args), 3)
+        self.assertIn("rig relaunched this conversation with base + web", second_args[2])
         self.assertIn("sandbox", json.loads(self.claude_calls()[1][1]))
         self.assertEqual(list((self.home / ".rig" / "switch").iterdir()), [])
 
@@ -571,6 +574,48 @@ class Shell(RigCase):
         checkout.write_text("")
         self.write_wrapper(checkout)
         self.assertEqual(self.rig("freshness").stdout, "")
+
+
+class Badge(RigCase):
+    def setUp(self):
+        super().setUp()
+        self.beacon_log = Path(self._tmp.name) / "beacon-argv.jsonl"
+        beacon = self.bin / "beacon"
+        beacon.write_text(f"#!{sys.executable}\nimport json, sys\n"
+                          f"open({str(self.beacon_log)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                          "print('beacon chatter')\n")
+        beacon.chmod(0o755)
+
+    def beacon_calls(self) -> list[list[str]]:
+        if not self.beacon_log.exists():
+            return []
+        return [json.loads(line) for line in self.beacon_log.read_text().splitlines()]
+
+    def test_launch_14_badge_names_the_rigs(self):
+        result = self.rig("badge", env={"RIG_CURRENT": "web docs"})
+        self.assertEqual((result.returncode, result.stdout), (0, ""))
+        self.assertEqual(self.beacon_calls(), [["badge", "web ✦ docs"]])
+
+    def test_launch_14_badge_names_base_alone(self):
+        self.rig("badge", env={"RIG_CURRENT": "base"})
+        self.assertEqual(self.beacon_calls(), [["badge", "base"]])
+
+    def test_launch_14_no_badge_outside_a_rig_launch(self):
+        result = self.rig("badge")
+        self.assertEqual((result.returncode, result.stdout), (0, ""))
+        self.assertEqual(self.beacon_calls(), [])
+
+    def test_launch_14_silent_without_beacon(self):
+        (self.bin / "beacon").unlink()
+        result = self.rig("badge", env={"RIG_CURRENT": "web", "PATH": f"{self.bin}{os.pathsep}/usr/bin:/bin"})
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+
+    def test_launch_14_hook_skips_a_session_rig_did_not_launch(self):
+        env = {**self.env, "CLAUDE_PLUGIN_ROOT": str(RIG.parent.parent)}
+        subprocess.run(["bash", str(RIG.parent.parent / "hooks" / "beacon-badge.sh")], env=env, check=True)
+        subprocess.run(["bash", str(RIG.parent.parent / "hooks" / "beacon-badge.sh")],
+                       env={**env, "RIG_CURRENT": "web"}, check=True)
+        self.assertEqual(self.beacon_calls(), [["badge", "web"]])
 
 
 class Doctor(RigCase):
@@ -898,7 +943,8 @@ class Sandbox(RigCase):
         result = self.rig("--sandbox", "-p", "hi")
         overlay, args = self.launched()
         self.assertEqual(overlay["sandbox"],
-                         {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False})
+                         {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
+                          "autoAllowBashIfSandboxed": True})
         self.assertEqual(args, ["-p", "hi"])
         self.assertIn("sandbox: on", result.stderr)
 

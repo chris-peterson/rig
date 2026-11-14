@@ -282,8 +282,8 @@ Sandbox
 
 #### `SANDBOX-01`
 Where a launch passes `--sandbox`, the system shall start Claude Code with the
-sandbox on, failing if the sandbox is unavailable and allowing no unsandboxed
-commands.
+sandbox on, running sandboxed commands without a permission prompt, failing if
+the sandbox is unavailable and allowing no unsandboxed commands.
 
 ### `LAUNCH`
 Launch
@@ -354,6 +354,11 @@ plugins, naming the ones taken out, in place of the rigs.
 The picker shall end its footer with a 🚀 launch item, animated unless
 Textual's animations are off, that launches on a click.
 
+#### `LAUNCH-14`
+Where beacon is installed, when a session rig launched at a terminal starts,
+the system shall put the session's rigs on beacon's pane badge, separated by
+` ✦ `.
+
 ### `SWITCH`
 Switching rigs mid-session
 
@@ -365,7 +370,8 @@ Code.
 #### `SWITCH-02`
 When Claude Code exits after a recorded switch, the system shall launch the
 named rigs resuming the same conversation, with the launch's sandbox state, and
-offer pins as any launch does.
+offer pins as any launch does. The resumed conversation shall open with a turn
+saying the switch is done.
 
 #### `SWITCH-03`
 If the user runs `/rig:switch <rig>...` in a session rig did not launch at a

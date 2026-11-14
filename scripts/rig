@@ -217,7 +217,8 @@ def plan(selected: list[str], rigs: dict, installed: set[str], pins: list[dict],
     return Plan(selected, sources, [p for p in sources if p not in installed], offered, added, removed)
 
 
-SANDBOX_SETTINGS = {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False}
+SANDBOX_SETTINGS = {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
+                    "autoAllowBashIfSandboxed": True}
 
 
 def take_flag(args: list[str], flag: str) -> tuple[bool, list[str]]:
@@ -340,7 +341,7 @@ def launch(selected: list[str] | None, args: list[str]) -> None:
             switch = take_switch(request)
             if switch is None:
                 raise SystemExit(status)
-            selected, args = switch["rigs"], ["--resume", switch["session"]]
+            selected, args = switch["rigs"], ["--resume", switch["session"], switched_prompt(switch["rigs"])]
             print(f"{PROG}: switching to {label(selected)}, resuming this conversation", file=sys.stderr)
     finally:
         request.unlink(missing_ok=True)
@@ -437,6 +438,13 @@ def take_switch(path: Path) -> dict | None:
     switch = read_yaml(path)
     path.unlink()
     return switch
+
+
+def switched_prompt(selected: list[str]) -> str:
+    """SWITCH-02: the turn a relaunch opens with, so the resumed conversation doesn't end on "type /exit"."""
+    return (f"rig relaunched this conversation with {label(selected)}; the switch is done. "
+            "In a line or two, confirm it and say what this session can do now that it couldn't before, "
+            "then carry on with what we were doing.")
 
 
 def run_claude(args: list[str], env: dict[str, str]) -> int:
@@ -2232,6 +2240,24 @@ def cmd_freshness(args: list[str]) -> int:
     return 0
 
 
+BADGE_SEPARATOR = " ✦ "
+
+
+def cmd_badge(args: list[str]) -> int:
+    """LAUNCH-14: put the rigs a session launched with on beacon's pane badge, when beacon is installed."""
+    import shutil
+    rigs = os.environ.get(CURRENT_RIG_ENV, "").split()
+    beacon = shutil.which("beacon")
+    if not rigs or beacon is None:
+        return 0
+    try:
+        subprocess.run([beacon, "badge", BADGE_SEPARATOR.join(rigs)], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return 0
+
+
 ZSH_COMPLETION = r"""#compdef rig
 
 _rig_help_commands() {
@@ -2528,8 +2554,9 @@ arguments start a session with the default rigs. The install makes `claude` run
 `rig claude`, which does the same, and launches the default rigs when given no
 arguments. `rig rig <command>` is the same as `rig <command>`.
 
-  --sandbox                  with a launch: run Bash in Claude Code's sandbox, failing if
-                             it's unavailable and allowing no unsandboxed commands
+  --sandbox                  with a launch: run Bash in Claude Code's sandbox without
+                             prompting, failing if it's unavailable and allowing no
+                             unsandboxed commands
   --select                   with a launch: pick the rigs and pins on the graph first,
                              with the arrow keys, space, p, or the mouse
   -h, --help, help           show this help
@@ -2547,9 +2574,10 @@ COMMANDS = {
     "completions": cmd_completions,
     "complete": cmd_complete,
     "freshness": cmd_freshness,
+    "badge": cmd_badge,
     "switch": cmd_switch,
 }
-UNCOMPLETED_COMMANDS = {"completions", "complete", "freshness", "switch"}
+UNCOMPLETED_COMMANDS = {"completions", "complete", "freshness", "badge", "switch"}
 CLAUDE_SUBCOMMANDS_TAKEN = {"plugin": ("pin", "unpin"), "plugins": ("pin", "unpin")}
 
 

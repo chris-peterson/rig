@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `--sandbox` launches run sandboxed Bash commands without a permission prompt
+  again. Claude Code 2.1.325 started prompting for them by default; rig now
+  sets `sandbox.autoAllowBashIfSandboxed` to keep the old behavior.
+- With beacon installed, a session rig launches at a terminal shows its rigs
+  on the pane badge, `web ✦ docs`, and a switch updates it when the
+  conversation relaunches.
+- After `/rig:switch` and `/exit`, the relaunched conversation opens with a
+  turn saying the switch is done and what the new rigs bring, instead of
+  coming back to the old "type `/exit`" message.
 - `claude --select` (or `rig use <rig>... --select`) opens a picker before the
   launch: the `rig list --graph` table with `full` added. One cursor moves over
   the rig names and plugin rows with the arrow keys and tab, and space, enter,

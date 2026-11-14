@@ -16,4 +16,6 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}/scripts/rig" switch $ARGUMENTS --
 The switch takes effect when Claude Code exits: rig relaunches this
 conversation with the new rigs' plugins and asks about pins again. Plugins
 loaded now stay loaded until then. When it succeeds, end the turn by telling
-the user to type `/exit`; a skill can't exit Claude Code for them.
+the user to type `/exit`; a skill can't exit Claude Code for them. The
+relaunched conversation opens with a message from rig saying the switch is
+done; answer that one briefly.
