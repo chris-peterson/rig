@@ -202,8 +202,11 @@ after you exit.
 claude --sandbox         # this launch only
 ```
 
-The sandbox runs Bash commands in Claude Code's sandbox, fails the launch when
-the sandbox isn't available, and allows no unsandboxed commands.
+The sandbox runs Bash commands in Claude Code's sandbox without a permission
+prompt for each one, fails the launch when the sandbox isn't available, and
+allows no unsandboxed commands. Claude Code 2.1.325 stopped running sandboxed
+commands unprompted by default, so rig sets `sandbox.autoAllowBashIfSandboxed`
+to keep them that way.
 
 ## What a launch shows
 
