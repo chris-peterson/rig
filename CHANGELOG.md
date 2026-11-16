@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Closing the terminal under the `--select` picker, the launch confirmation,
+  or the rig editor now ends rig. Started with SIGHUP ignored, it used to keep
+  running with no terminal, using a full CPU core until killed.
 - `--sandbox` launches run sandboxed Bash commands without a permission prompt
   again. Claude Code 2.1.325 started prompting for them by default; rig now
   sets `sandbox.autoAllowBashIfSandboxed` to keep the old behavior.

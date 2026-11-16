@@ -369,12 +369,12 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
     elif select or current.missing or any(not offer.locked for offer in current.offered):
         plan_for = lambda names, *picks: plan(names, rigs, installed, pins, cwd, *picks)
         if not select:
-            answer = launch_app(plan_for, rig_order(rigs), current, sandbox_flag).run()
+            answer = run_app(launch_app(plan_for, rig_order(rigs), current, sandbox_flag))
         while select:
             everything = sorted(installed, key=str.casefold)
             columns = [{"name": name, "default": name in config["default"],
                         "plugins": everything if name == FULL else rigs[name]["plugins"]} for name in rig_order(rigs)]
-            answer = select_app(plan_for, columns, everything, pins, current, sandbox_flag, invocation()).run()
+            answer = run_app(select_app(plan_for, columns, everything, pins, current, sandbox_flag, invocation()))
             if answer is None or answer[0] != EDIT:
                 break
             setup()
@@ -466,6 +466,37 @@ def run_claude(args: list[str], env: dict[str, str]) -> int:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
     return 128 - status if status < 0 else status
+
+
+def run_app(app):
+    """LAUNCH-15: run a full-screen app, ending the process as a hangup does once its terminal is gone.
+
+    A closed terminal ends rig by SIGHUP, unless rig started with SIGHUP ignored (an ignored signal survives
+    exec, so a nohup'd or HUP-immune parent passes that on). Then the app would outlive the terminal, and
+    Textual's input thread, which skips the empty read a hung-up terminal returns, spins a core indefinitely.
+    So SIGHUP takes its default action while the app runs, and since a hangup can also reach rig with no
+    SIGHUP at all, a watchdog polls stdin four times a second for POLLHUP, which doesn't consume input, and
+    raises SIGHUP itself. macOS reports POLLHUP on a terminal only to a poll that asks for POLLIN, so it asks
+    for that and waits between polls rather than in them, or keys not yet read would wake it at once."""
+    import select
+    import signal
+    import threading
+    done = threading.Event()
+
+    def watch() -> None:
+        poller = select.poll()
+        poller.register(sys.__stdin__.fileno(), select.POLLIN)
+        while not done.wait(0.25):
+            if any(mask & (select.POLLHUP | select.POLLNVAL) for _fd, mask in poller.poll(0)):
+                os.kill(os.getpid(), signal.SIGHUP)
+
+    previous = signal.signal(signal.SIGHUP, signal.SIG_DFL)
+    threading.Thread(target=watch, name="rig-hangup-watch", daemon=True).start()
+    try:
+        return app.run()
+    finally:
+        done.set()
+        signal.signal(signal.SIGHUP, previous)
 
 
 def cmd_switch(args: list[str]) -> int:
@@ -2035,7 +2066,7 @@ def editor_app(edits: RigEdits):
 
 def setup() -> None:
     """SETUP-01..05: open the rig editor on the rig definitions, or on a new base rig."""
-    editor_app(open_edits()).run()
+    run_app(editor_app(open_edits()))
 
 
 def save_config(config: dict) -> None:

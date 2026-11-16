@@ -359,6 +359,11 @@ Where beacon is installed, when a session rig launched at a terminal starts,
 the system shall put the session's rigs on beacon's pane badge, separated by
 ` ✦ `.
 
+#### `LAUNCH-15`
+If the terminal goes away while the launch confirmation, the picker, or the rig
+editor is open, then the system shall exit as a hangup ends it, even when it
+started with SIGHUP ignored.
+
 ### `SWITCH`
 Switching rigs mid-session
 

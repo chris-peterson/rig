@@ -920,6 +920,44 @@ class Pins(RigCase):
         self.assertIn("rig: base + web, 3 plugins", output)
         self.assertEqual(self.launched()[1], ["--", "hi"])
 
+    def picker_status_after_hangup(self, preexec) -> int | None:
+        """Open the picker on a pty, close the pty as a closed tab does, and return rig's exit status,
+        or None if it is still running five seconds later (killing it)."""
+        master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 110, 0, 0))
+        proc = subprocess.Popen([sys.executable, str(RIG), "--select", "--", "hi"], stdin=slave, stdout=slave,
+                                stderr=slave, env=self.env, cwd=self.home, preexec_fn=preexec)
+        os.close(slave)
+        output, deadline = b"", time.monotonic() + 30
+        while ALT_SCREEN not in output and time.monotonic() < deadline and proc.poll() is None:
+            if select.select([master], [], [], 0.3)[0]:
+                output += os.read(master, 4096)
+        self.assertIn(ALT_SCREEN, output, output.decode(errors="replace"))
+        time.sleep(1)
+        os.close(master)
+        try:
+            return proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            return None
+
+    def test_launch_15_picker_exits_on_hangup_with_sighup_ignored(self):
+        import signal
+
+        def hup_immune_session():
+            os.setsid()
+            fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+            signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
+        self.assertEqual(self.picker_status_after_hangup(hup_immune_session), -signal.SIGHUP)
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_launch_15_picker_exits_on_hangup_without_sighup(self):
+        import signal
+        self.assertEqual(self.picker_status_after_hangup(os.setsid), -signal.SIGHUP)
+        self.assertEqual(self.claude_calls(), [])
+
     def test_tab_unpin_names_read_from_pins_file(self):
         self.rig("pin", str(self.ckout))
         self.rig("pin", str(self.checkout("x")))
