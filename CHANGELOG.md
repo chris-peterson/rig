@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Closing the terminal under the `--select` picker, the launch confirmation,
   or the rig editor now ends rig. Started with SIGHUP ignored, it used to keep
