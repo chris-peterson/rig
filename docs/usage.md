@@ -175,7 +175,10 @@ When a loaded pin's checkout holds the folder you start in, or sits inside it,
 rig sets `CLAUDE_CODE_AUTO_MODE_SERVER=0` for that session, since auto mode
 refuses edits there otherwise
 ([anthropics/claude-code#95982](https://github.com/anthropics/claude-code/issues/95982)).
-A value you set yourself wins.
+A value you set yourself wins. This leans on auto mode's billed classifier
+fallback, which Claude Code 2.1.327 announced an upcoming release removes; once
+it's gone, edits in a pinned checkout are asked about or denied until #95982 is
+fixed.
 
 ## Switching rigs mid-session
 

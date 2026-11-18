@@ -296,6 +296,8 @@ def auto_mode_server_off(loaded: list[dict], cwd: Path) -> list[str]:
         return []
     # Auto mode refuses edits inside a --plugin-dir checkout under the session's folder:
     # https://github.com/anthropics/claude-code/issues/95982
+    # Turning the server off leaves auto mode on its billed classifier fallback, which Claude Code 2.1.327
+    # announced an upcoming release removes; after that, this workaround stops working. Retire it with #95982.
     os.environ[AUTO_MODE_SERVER] = "0"
     return [f"auto mode: {AUTO_MODE_SERVER}=0, since {', '.join(here)} {'is' if len(here) == 1 else 'are'} pinned here"]
 

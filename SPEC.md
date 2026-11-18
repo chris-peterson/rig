@@ -265,6 +265,10 @@ inside it, the system shall start Claude Code with
 `CLAUDE_CODE_AUTO_MODE_SERVER=0`, unless the environment already sets it, and
 say so before Claude Code starts.
 
+> Rationale: works around anthropics/claude-code#95982 by putting auto mode on
+> its billed classifier fallback. Claude Code 2.1.327 announced that fallback's
+> removal, so this requirement expires with it; retire it once #95982 is fixed.
+
 #### `PIN-12`
 The system shall mark each pinned plugin with 📌 wherever it lists plugins or
 pins: the launch summary, `rig pin`, `rig list`, the graph, the picker, the
