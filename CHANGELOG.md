@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- A rig can carry `rules` that make it a default wherever they match, so a
+  plain `claude` loads what the folder needs: `path` for where you launch
+  (`~/src/acme/`, or `*infra*/` for any folder with infra in its name) and
+  `exists` for files in the repo (`**/*.tf`, `SPEC.md`). The launch line says
+  which rule added each rig, and `rig list` shows the defaults for the current
+  folder. Rules add to the `default` list, which still applies everywhere.
+
 ## 0.2.0
 
 - Closing the terminal under the `--select` picker, the launch confirmation,

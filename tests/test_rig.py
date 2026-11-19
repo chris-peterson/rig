@@ -351,6 +351,162 @@ class Rigs(RigCase):
         self.assertEqual(self.rig("-p", "hi", cwd=project).returncode, 0)
 
 
+RULE_RIGS = """\
+    rigs:
+      base:
+        plugins: [core@tools]
+      work:
+        plugins: [deploy@acme]
+        rules:
+          - path: ~/src/acme/
+      infra:
+        plugins: [terraform@tools]
+        rules:
+          - path: "*infra*/"
+          - exists: ["**/*.tf"]
+      spec:
+        plugins: [spec-kit@tools]
+        rules:
+          - exists: SPEC.md
+      both:
+        plugins: [release@acme]
+        rules:
+          - path: ~/src/acme/
+            exists: [Makefile]
+    """
+
+
+class Rules(RigCase):
+    def setUp(self):
+        super().setUp()
+        self.write_rigs(RULE_RIGS)
+        self.write_installed("core@tools", "deploy@acme", "terraform@tools", "spec-kit@tools", "release@acme")
+
+    def folder(self, *parts: str) -> Path:
+        path = self.home.joinpath(*parts)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def repo(self, *parts: str) -> Path:
+        path = self.folder(*parts)
+        subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+        return path
+
+    def rigs_at(self, cwd: Path) -> str:
+        result = self.rig("-p", "hi", cwd=cwd)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stderr.splitlines()[0]
+
+    def test_rig_18_matching_rule_makes_a_default_rig(self):
+        self.assertTrue(self.rigs_at(self.folder("src", "acme", "svc")).startswith("rig: base + work,"))
+        self.assertTrue(self.rigs_at(self.folder("src", "github", "svc")).startswith("rig: base,"))
+
+    def test_rig_18_rules_add_to_the_listed_defaults(self):
+        self.write_rigs("default: [spec]\n" + textwrap.dedent(RULE_RIGS))
+        self.assertTrue(self.rigs_at(self.folder("src", "acme")).startswith("rig: base + spec + work,"))
+
+    def test_rig_18_a_rule_matches_only_when_each_condition_does(self):
+        svc = self.repo("src", "acme", "svc")
+        self.assertNotIn("both", self.rigs_at(svc))
+        (svc / "Makefile").write_text("")
+        self.assertIn("+ both", self.rigs_at(svc))
+        other = self.repo("src", "other")
+        (other / "Makefile").write_text("")
+        self.assertNotIn("both", self.rigs_at(other))
+
+    def test_rig_19_path_matching(self):
+        rig = load_rig()
+        home = Path.home().resolve()
+        cases = [("~/src/acme/", home / "src" / "acme", True),
+                 ("~/src/acme/", home / "src" / "acme" / "a" / "b", True),
+                 ("~/src/acme/", home / "src" / "acme-old", False),
+                 ("~/src/acme", home / "src" / "acme", True),
+                 ("~/src/acme", home / "src" / "acme" / "a", False),
+                 ("*infra*/", Path("/x/infrastructure/toolbox"), True),
+                 ("*infra*/", Path("/x/Cloud-Infra"), True),
+                 ("*infra*/", Path("/x/web/Infrastructure"), True),
+                 ("*infra*/", Path("/x/shop/api"), False),
+                 ("~/SRC/Acme/", home / "src" / "acme" / "a", True),
+                 ("/x/*/api", Path("/x/a/api"), True),
+                 ("/x/*/api", Path("/x/a/b/api"), False),
+                 ("/x/**/api", Path("/x/a/b/api"), True)]
+        for pattern, folder, expected in cases:
+            with self.subTest(pattern=pattern, folder=folder):
+                self.assertEqual(rig.path_matches(pattern, folder), expected)
+
+    def test_rig_20_exists_matches_the_repository_from_its_root(self):
+        repo = self.repo("src", "tf-svc")
+        sub = self.folder("src", "tf-svc", "deep", "er")
+        self.assertNotIn("infra", self.rigs_at(sub))
+        (repo / "deploy").mkdir()
+        (repo / "deploy" / "main.tf").write_text("")
+        self.assertIn("+ infra", self.rigs_at(sub))
+        (sub / "SPEC.md").write_text("")
+        self.assertNotIn("spec", self.rigs_at(sub))
+        (repo / "SPEC.md").write_text("")
+        self.assertIn("+ spec", self.rigs_at(sub))
+
+    def test_rig_20_ignored_files_dont_count(self):
+        repo = self.repo("src", "app")
+        (repo / ".gitignore").write_text("vendor/\n")
+        self.folder("src", "app", "vendor")
+        (repo / "vendor" / "x.tf").write_text("")
+        self.assertNotIn("infra", self.rigs_at(repo))
+
+    def test_rig_20_outside_a_repository_the_files_under_the_folder(self):
+        folder = self.folder("scratch", "plain")
+        self.folder("scratch", "plain", "a")
+        (folder / "a" / "main.tf").write_text("")
+        self.assertIn("+ infra", self.rigs_at(folder))
+
+    def test_launch_02_names_the_rule_behind_each_default(self):
+        repo = self.repo("src", "acme", "infrastructure", "toolbox")
+        (repo / "SPEC.md").write_text("")
+        stderr = self.rig("-p", "hi", cwd=repo).stderr
+        self.assertIn("rig: base + infra + spec + work, 4 plugins\n"
+                      "by rule: infra (path *infra*/), spec (exists SPEC.md), work (path ~/src/acme/)\n", stderr)
+
+    def test_launch_02_named_rigs_skip_the_rules(self):
+        result = self.rig("use", "spec", "-p", "hi", cwd=self.folder("src", "acme"))
+        self.assertIn("rig: base + spec, 2 plugins\n", result.stderr)
+        self.assertNotIn("by rule", result.stderr)
+
+    def test_rig_07_list_names_the_rule(self):
+        out = self.rig("list", cwd=self.folder("src", "acme")).stdout
+        self.assertIn("work (default here: path ~/src/acme/)\n", out)
+        self.assertIn("\ninfra\n", out)
+
+    def test_rig_13_list_json_carries_rules(self):
+        listed = json.loads(self.rig("list", "--json", cwd=self.folder("src", "acme")).stdout)
+        self.assertEqual(listed["default"], ["work"])
+        rigs = {r["name"]: r for r in listed["rigs"]}
+        self.assertEqual(rigs["work"]["rules"], [{"path": "~/src/acme/"}])
+        self.assertEqual(rigs["work"]["rule"], "path ~/src/acme/")
+        self.assertEqual((rigs["infra"]["default"], rigs["infra"]["rule"]), (False, None))
+
+    def test_rig_14_graph_stars_the_defaults_here(self):
+        head = self.rig("list", "--graph", cwd=self.folder("src", "acme")).stdout.splitlines()[0]
+        self.assertIn("★work", head)
+        self.assertNotIn("★infra", head)
+
+    def test_rig_11_rules_out_of_shape_refused(self):
+        cases = {
+            "rigs:\n  base: {plugins: [], rules: [{path: x/}]}\n": "rig base in",
+            "rigs:\n  base: {plugins: []}\n  web: {rules: [{branch: main}]}\n": "gives path, exists, or both",
+            "rigs:\n  base: {plugins: []}\n  web: {rules: [{}]}\n": "gives path, exists, or both",
+            "rigs:\n  base: {plugins: []}\n  web: {rules: {path: x/}}\n": "rules should be a list",
+            "rigs:\n  base: {plugins: []}\n  web: {rules: [{exists: []}]}\n": "exists should be a glob",
+            "rigs:\n  base: {plugins: []}\n  web: {rules: [{path: [a, b]}]}\n": "path should be one pattern",
+        }
+        for text, message in cases.items():
+            with self.subTest(text=text):
+                self.write_rigs(text)
+                result = self.rig("-p", "hi")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+        self.assertEqual(self.claude_calls(), [])
+
+
 class Launch(RigCase):
     def setUp(self):
         super().setUp()
@@ -1239,6 +1395,23 @@ class Edits(unittest.TestCase):
         self.assertEqual(edits.order(), ["base", "Alpha", "api", "web", "zeta", "full"])
         edits.rename("zeta", "beta")
         self.assertEqual(edits.order(), ["base", "Alpha", "api", "beta", "web", "full"])
+
+    def test_editor_08_rules_kept_through_rename_and_save(self):
+        rules = [{"path": "~/src/acme/"}, {"exists": ["**/*.tf"]}]
+        config = {"default": [], "clones": {}, "rigs": {
+            "base": {"plugins": ["b@m"]}, "web": {"plugins": ["a@m"], "rules": rules}, "api": {"plugins": []}}}
+        edits = self.rig.RigEdits(config, [], [], [])
+        edits.rename("web", "front")
+        with tempfile.TemporaryDirectory() as home:
+            previous, os.environ["HOME"] = os.environ["HOME"], home
+            try:
+                edits.save()
+                import yaml
+                saved = yaml.safe_load((Path(home) / ".rig" / "rigs.yml").read_text())
+            finally:
+                os.environ["HOME"] = previous
+        self.assertEqual(saved["rigs"]["front"], {"plugins": ["a@m"], "rules": rules})
+        self.assertEqual(saved["rigs"]["api"], {})
 
     def test_editor_08_saved_in_alphabetical_order(self):
         config = {"default": ["web", "api"], "clones": {}, "rigs": {

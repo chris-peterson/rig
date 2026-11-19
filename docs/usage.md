@@ -143,6 +143,58 @@ installs it first. With nobody at a terminal to confirm, the launch is refused.
 Everything rig doesn't recognize goes to Claude Code unchanged. Claude Code's
 own subcommands (`claude plugin list`, `claude mcp`) run without a rig.
 
+### Default rigs by folder
+
+A rig can carry rules that make it a default wherever they match, so a plain
+`claude` picks up what the folder needs without your naming it. A rig loads
+when any of its rules matches, and a rule matches when each condition it gives
+does:
+
+```yaml
+default: []                       # defaults everywhere; rules add to these
+rigs:
+  work:
+    plugins: [...]
+    rules:
+      - path: ~/src/acme/         # this folder and everything under it
+  infra:
+    plugins: [...]
+    rules:
+      - path: "*infra*/"          # any folder with infra in its name, at any depth
+      - exists: ["**/*.tf"]       # or a repo holding Terraform
+  spec:
+    plugins: [...]
+    rules:
+      - exists: SPEC.md           # at the repo root
+  release:
+    plugins: [...]
+    rules:
+      - path: ~/src/acme/         # both conditions have to match
+        exists: [.gitlab-ci.yml]
+```
+
+- **`path`** matches the folder you launch in the way git's
+  `includeIf "gitdir/i:"` does. Case doesn't matter, and `~/` is your home
+  folder. A pattern that doesn't start with `/` or `~/` matches at any depth,
+  `*` stays within one folder name, and `**` spans folders. A trailing `/`
+  matches that folder and everything under it.
+- **`exists`** takes one glob or a list of them, matched from the root of the
+  repo you launch in, the way GitLab CI's `rules:exists` matches. It counts
+  tracked files and untracked ones git doesn't ignore. Outside a repo, it
+  looks at the first 10,000 files under the folder.
+
+The launch says which rule added each rig:
+
+```text
+rig: base + work + infra, 21 plugins
+by rule: work (path ~/src/acme/), infra (exists **/*.tf)
+```
+
+Naming rigs (`rig use web`) skips the rules. `rig list` shows which rigs are
+defaults in the current folder and why, `rig list --graph` and the `--select`
+picker star them, and the rig editor keeps the rules as they are when it saves.
+Edit rules in `~/.rig/rigs.yml`.
+
 ## Pins
 
 A pin is a local checkout of a plugin that stands in for its installed copy, so

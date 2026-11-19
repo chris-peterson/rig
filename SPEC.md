@@ -21,7 +21,11 @@ below its category's heading, so every requirement has a linkable anchor
 - **full**: a rig that rig provides, holding every installed plugin.
 - **none**: a preset that rig provides, launching stock Claude Code with no
   plugins at all.
-- **default rigs**: the rigs a launch adds to the base rig when it names none.
+- **default rigs**: the rigs a launch adds to the base rig when it names none:
+  the rigs listed as defaults, and the rigs whose rules match the working
+  directory.
+- **rule**: a condition on a rig, on the working directory's path or the files
+  in its repository, under which the rig is a default rig.
 - **pin**: a local plugin checkout that stands in for the plugin's installed
   copy, so changes to the checkout can be used for a stretch of real work
   before a marketplace release.
@@ -62,7 +66,8 @@ rig and the default rigs.
 
 #### `RIG-07`
 When the user runs `rig list`, the system shall list each rig with its plugins,
-marking the base rig and the default rigs.
+marking the base rig and the default rigs, and naming the rule that makes a rig
+a default in the working directory.
 
 #### `RIG-08`
 If a rig names a plugin that is not installed, then the system shall list it
@@ -77,13 +82,14 @@ confirm, then the system shall refuse the launch, naming the plugin.
 The system shall provide a rig named `full` that loads every installed plugin.
 
 #### `RIG-11`
-If the rig definitions give a rig anything but plugins, define a rig named
-`full` or `none`, or define no rig named `base`, then the system shall refuse
-the launch, saying which.
+If the rig definitions give a rig anything but plugins and rules, give the base
+rig rules, give a rule a condition other than `path` and `exists` or no
+condition at all, define a rig named `full` or `none`, or define no rig named
+`base`, then the system shall refuse the launch, saying which.
 
 #### `RIG-13`
 When the user runs `rig list --json`, the system shall print the rigs, their
-plugins, and the default rigs as JSON.
+plugins and rules, and the default rigs as JSON.
 
 #### `RIG-14`
 When the user runs `rig list --graph`, the system shall print a table of
@@ -102,6 +108,25 @@ and launch only once the user at the terminal confirms.
 #### `RIG-17`
 If a launch names `none` along with other rigs, or no one is at a terminal to
 confirm it, then the system shall refuse the launch.
+
+#### `RIG-18`
+Where a rig has rules, the system shall make it a default rig in a working
+directory where any of its rules matches, a rule matching when each of its
+conditions does.
+
+#### `RIG-19`
+When a rule gives a `path`, the system shall match the working directory against
+it as git's `includeIf "gitdir/i:"` matches its pattern: ignoring case, `~/`
+standing for the home folder, a pattern that doesn't start with `/` or `~/`
+matching at any depth, `**` spanning folders, and a trailing `/` matching the
+folder and everything under it.
+
+#### `RIG-20`
+When a rule gives `exists`, the system shall match it when a file that matches
+one of its globs, from the root of the working directory's git repository,
+is tracked there or untracked and not ignored, as GitLab CI's `rules:exists`
+matches; outside a repository, when one of the first 10,000 files under the
+working directory matches.
 
 #### `RIG-12`
 When a launch starts, the system shall turn off each plugin the user's Claude
@@ -188,7 +213,7 @@ refuse, saying why.
 #### `EDITOR-08`
 When the user saves, the system shall write the rigs to the rig definitions
 file, the base rig first and the rest in alphabetical order, each with its
-plugins in alphabetical order.
+plugins in alphabetical order and its rules as they were.
 
 #### `EDITOR-09`
 If the user quits the rig editor with unsaved changes, then the system shall
@@ -297,8 +322,8 @@ The system shall pass every argument it does not consume to Claude Code
 unchanged.
 
 #### `LAUNCH-02`
-When a launch starts, the system shall print the rigs, the pins, and the sandbox
-state before Claude Code starts.
+When a launch starts, the system shall print the rigs, the rule that made each
+rig a default, the pins, and the sandbox state before Claude Code starts.
 
 #### `LAUNCH-03`
 When the user runs `rig` with arguments that don't start with one of rig's

@@ -126,12 +126,13 @@ def load_config() -> dict | None:
     for name, rig in rigs.items():
         if rig is None:
             rig = rigs[name] = {}
-        if not isinstance(rig, dict) or set(rig) - {"plugins"}:
-            fail(f"rig {name} in {path}: a rig holds only `plugins`, and every launch loads the base rig with it. "
-                 "Take out anything else, such as `extends`.")
+        if not isinstance(rig, dict) or set(rig) - {"plugins", "rules"}:
+            fail(f"rig {name} in {path}: a rig holds only `plugins` and `rules`, and every launch loads the base "
+                 "rig with it. Take out anything else, such as `extends`.")
         rig["plugins"] = rig.get("plugins") or []
         if not isinstance(rig["plugins"], list) or not all(isinstance(v, str) for v in rig["plugins"]):
             fail(f"rig {name} in {path}: plugins should be a list of names.")
+        check_rules(name, rig, path)
     if rigs and BASE not in rigs:
         fail(f"{path} defines no rig named {BASE}, the rig every launch loads.")
     default = data.get("default") or []
@@ -147,6 +148,129 @@ def load_config() -> dict | None:
         fail(f"dismissed in {path} should be a list of plugin names.")
     data["dismissed"] = dismissed
     return data
+
+
+RULE_CONDITIONS = ("path", "exists")
+
+
+def check_rules(name: str, rig: dict, path: Path) -> None:
+    """RIG-11, RIG-18: a rig's rules as a list of mappings, each giving `path`, `exists`, or both."""
+    rules = rig.get("rules")
+    if rules is None:
+        rig.pop("rules", None)
+        return
+    if name == BASE:
+        fail(f"rig {BASE} in {path} has rules, but every launch loads {BASE}. Put the rules on another rig.")
+    if not isinstance(rules, list):
+        fail(f"rig {name} in {path}: rules should be a list, each rule giving path, exists, or both.")
+    for rule in rules:
+        if not isinstance(rule, dict) or not rule or set(rule) - set(RULE_CONDITIONS):
+            fail(f"rig {name} in {path}: a rule gives path, exists, or both, and nothing else: {rule}")
+        if "path" in rule and not (isinstance(rule["path"], str) and rule["path"]):
+            fail(f"rig {name} in {path}: a rule's path should be one pattern: {rule}")
+        exists = rule.get("exists", [])
+        exists = [exists] if isinstance(exists, str) else exists
+        if "exists" in rule and not (isinstance(exists, list) and exists and all(isinstance(g, str) and g for g in exists)):
+            fail(f"rig {name} in {path}: a rule's exists should be a glob or a list of them: {rule}")
+
+
+def glob_pattern(glob: str) -> str:
+    """A regular expression for a glob: `**/` any folders or none, `**` anything, `*` and `?` within a folder."""
+    out, i = [], 0
+    while i < len(glob):
+        if glob.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif glob.startswith("**", i):
+            out.append(".*")
+            i += 2
+        else:
+            out.append({"*": "[^/]*", "?": "[^/]"}.get(glob[i], re.escape(glob[i])))
+            i += 1
+    return "".join(out)
+
+
+def path_matches(pattern: str, cwd: Path) -> bool:
+    """RIG-19: as git's `includeIf "gitdir/i:"` matches: no case, `~/` the home folder, a pattern not rooted at
+    `/` or `~/` matching at any depth, and a trailing `/` matching the folder and all under it."""
+    if pattern.startswith("~/"):
+        pattern = str(Path.home().resolve()) + pattern[1:]
+    elif not pattern.startswith(("/", "**/")):
+        pattern = "**/" + pattern
+    if pattern.endswith("/"):
+        pattern += "**"
+    folders = {str(cwd.resolve())}
+    if os.environ.get("PWD") and Path(os.environ["PWD"]).resolve() == cwd.resolve():
+        folders.add(os.environ["PWD"].rstrip("/") or "/")
+    regex = re.compile(glob_pattern(pattern), re.IGNORECASE)
+    return any(regex.fullmatch(folder) or regex.fullmatch(folder.rstrip("/") + "/") for folder in folders)
+
+
+EXISTS_LIMIT = 10_000
+
+
+def repo_files(cwd: Path) -> list[str]:
+    """RIG-20: the files of cwd's git repository from its root, tracked or untracked and not ignored; outside a
+    repository, the first EXISTS_LIMIT files under cwd."""
+    try:
+        root = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd, capture_output=True, text=True)
+        if root.returncode == 0:
+            listed = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                                    cwd=root.stdout.strip(), capture_output=True, text=True, check=True)
+            return [name for name in listed.stdout.split("\0") if name]
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    files: list[str] = []
+    for folder, dirs, names in os.walk(cwd):
+        dirs[:] = sorted(d for d in dirs if d != ".git")
+        files += [str((Path(folder) / name).relative_to(cwd)) for name in sorted(names)]
+        if len(files) >= EXISTS_LIMIT:
+            return files[:EXISTS_LIMIT]
+    return files
+
+
+def rule_match(rule: dict, cwd: Path, files) -> str | None:
+    """RIG-18..20: what matched, `path ~/src/x/` or `exists **/*.tf`, when each of the rule's conditions does."""
+    matched = []
+    if "path" in rule:
+        if not path_matches(rule["path"], cwd):
+            return None
+        matched.append(f"path {rule['path']}")
+    if "exists" in rule:
+        globs = [rule["exists"]] if isinstance(rule["exists"], str) else rule["exists"]
+        found = next((glob for glob in globs if any(re.fullmatch(glob_pattern(glob.lstrip("/")), name)
+                                                    for name in files())), None)
+        if found is None:
+            return None
+        matched.append(f"exists {found}")
+    return ", ".join(matched)
+
+
+def default_rigs(config: dict, cwd: Path) -> dict[str, str | None]:
+    """RIG-06, RIG-18: the default rigs in cwd, each with the rule that made it one, or None for a listed one."""
+    found = {name: None for name in config["default"]}
+    listing: list[str] = []
+
+    def files() -> list[str]:
+        if not listing:
+            listing.append(repo_files(cwd))
+        return listing[0]
+
+    for name in rig_order(config["rigs"])[1:-1]:
+        if name in found:
+            continue
+        for rule in config["rigs"][name].get("rules", []):
+            matched = rule_match(rule, cwd, files)
+            if matched is not None:
+                found[name] = matched
+                break
+    return found
+
+
+def describe_rules(reasons: dict[str, str | None], selected: list[str]) -> list[str]:
+    """LAUNCH-02: the line naming the rule that made each of the launch's rigs a default."""
+    by_rule = [f"{name} ({reasons[name]})" for name in selected if reasons.get(name)]
+    return [f"by rule: {', '.join(by_rule)}"] if by_rule else []
 
 
 def selection(names: list[str]) -> list[str]:
@@ -330,15 +454,17 @@ def launch(selected: list[str] | None, args: list[str]) -> None:
         fail("rig starts Claude Code with its own --settings, and a second --settings replaces the first. "
              "Put these settings in ~/.claude/settings.json or the project's .claude/settings.json.")
     config = ensure_config(args)
+    reasons = {}
     if selected is None:
-        selected = config["default"]
+        reasons = default_rigs(config, Path.cwd())
+        selected = list(reasons)
     if not interactive(args):
-        exec_claude(claude_args(selected, args, sandbox_flag)[1])
+        exec_claude(claude_args(selected, args, sandbox_flag, reasons=reasons)[1])
     request = switch_file()
     try:
         while True:
-            selected, arguments = claude_args(selected, args, sandbox_flag, select_flag)
-            select_flag = False
+            selected, arguments = claude_args(selected, args, sandbox_flag, select_flag, reasons)
+            select_flag, reasons = False, {}
             status = run_claude(arguments, {SWITCH_ENV: str(request), CURRENT_RIG_ENV: " ".join(selected) or BASE})
             switch = take_switch(request)
             if switch is None:
@@ -349,9 +475,10 @@ def launch(selected: list[str] | None, args: list[str]) -> None:
         request.unlink(missing_ok=True)
 
 
-def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select: bool = False) -> tuple[list[str], list[str]]:
+def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select: bool = False, reasons: dict = {}) -> tuple[list[str], list[str]]:
     """RIG-04, RIG-08, RIG-09, RIG-12, PIN-10, LAUNCH-01..02, LAUNCH-05, LAUNCH-07: the rigs the launch uses and
-    the arguments that start Claude Code with them, once their plugins are installed and the pins chosen."""
+    the arguments that start Claude Code with them, once their plugins are installed and the pins chosen. The
+    reasons are the rules that made rigs defaults, for the ones still chosen."""
     config = load_config()
     rigs = config["rigs"]
     unknown = [name for name in selected if name not in rigs and name not in (FULL, NONE)]
@@ -374,7 +501,8 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
             answer = run_app(launch_app(plan_for, rig_order(rigs), current, sandbox_flag))
         while select:
             everything = sorted(installed, key=str.casefold)
-            columns = [{"name": name, "default": name in config["default"],
+            here = default_rigs(config, cwd)
+            columns = [{"name": name, "default": name in here,
                         "plugins": everything if name == FULL else rigs[name]["plugins"]} for name in rig_order(rigs)]
             answer = run_app(select_app(plan_for, columns, everything, pins, current, sandbox_flag, invocation()))
             if answer is None or answer[0] != EDIT:
@@ -396,7 +524,8 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
     replaced = {pin["plugin"] for pin in loaded}
     enabled = [p for p in plugins if p.split("@")[0] not in replaced]
     stray = [f"turned off in {display(user_settings_file())}: {', '.join(turned_off)}"] if turned_off else []
-    print(f"rig: {summary(current, ', ')}", *describe_pins(chosen), *stray, *auto_mode_server_off(loaded, cwd),
+    print(f"rig: {summary(current, ', ')}", *describe_rules(reasons, selected), *describe_pins(chosen), *stray,
+          *auto_mode_server_off(loaded, cwd),
           f"sandbox: {'on' if sandbox_flag else 'off'}", sep="\n", file=sys.stderr)
     plugin_dirs = [arg for pin in loaded for arg in ("--plugin-dir", pin["path"])]
     settings = overlay(enabled, replaced, known_plugin_ids(cwd), sandbox_flag, current.removed)
@@ -557,18 +686,21 @@ def cmd_list(args: list[str]) -> int:
             print("No rigs defined. Run: rig setup")
         return 0
     installed = sorted(installed_for(Path.cwd()), key=str.casefold)
-    rigs = [{"name": name, "built_in": name in BUILT_IN, "default": name in config["default"],
-             "plugins": installed if name == FULL else config["rigs"][name]["plugins"]}
+    here = default_rigs(config, Path.cwd())
+    rigs = [{"name": name, "built_in": name in BUILT_IN, "default": name in here, "rule": here.get(name),
+             "plugins": installed if name == FULL else config["rigs"][name]["plugins"],
+             "rules": [] if name == FULL else config["rigs"][name].get("rules", [])}
             for name in rig_order(config["rigs"])]
     pins = read_pins()
     if args == ["--json"]:
-        print(json.dumps({"default": config["default"], "rigs": rigs}, indent=2))
+        print(json.dumps({"default": list(here), "rigs": rigs}, indent=2))
     elif args == ["--graph"]:
         print(graph(rigs[:-1], installed, pins))
     else:
         pinned = pinned_names(pins)
         for rig in rigs:
-            note = " (every launch)" if rig["name"] == BASE else " (default)" if rig["default"] else ""
+            note = (" (every launch)" if rig["name"] == BASE else f" (default here: {rig['rule']})" if rig["rule"]
+                    else " (default)" if rig["default"] else "")
             plugins = ", ".join(plugin_cell(p, pinned) for p in rig["plugins"]) or "none"
             print(f"{rig['name']}{note}")
             print(f"  plugins: {'every installed plugin' if rig['name'] == FULL else plugins}")
@@ -1519,6 +1651,7 @@ class RigEdits:
         config = config or {"default": [], "clones": {}, "rigs": {}}
         self.clones = config.get("clones") or {}
         self.rigs = {name: list(rig["plugins"]) for name, rig in config["rigs"].items()}
+        self.rules = {name: rig["rules"] for name, rig in config["rigs"].items() if rig.get("rules")}
         self.default = list(config.get("default") or [])
         self.dismissed = list(config.get("dismissed") or [])
         if self.first_run:
@@ -1601,6 +1734,7 @@ class RigEdits:
         self.fixed(name, "renamed")
         self.check_name(new)
         self.rigs = {(new if rig == name else rig): plugins for rig, plugins in self.rigs.items()}
+        self.rules = {(new if rig == name else rig): rules for rig, rules in self.rules.items()}
         self.default = [new if rig == name else rig for rig in self.default]
         self.dirty = True
 
@@ -1638,14 +1772,17 @@ class RigEdits:
         """EDITOR-07."""
         self.fixed(name, "deleted")
         del self.rigs[name]
+        self.rules.pop(name, None)
         if name in self.default:
             self.default.remove(name)
         self.dirty = True
 
     def save(self) -> None:
-        """EDITOR-08, SETUP-03: the base rig first, then the rest, each rig's plugins in alphabetical order."""
+        """EDITOR-08, SETUP-03: the base rig first, then the rest, each rig's plugins in alphabetical order and
+        its rules as they were."""
         order = [name for name in self.order() if name != FULL]
-        rigs = {name: {"plugins": sorted(self.rigs[name], key=str.casefold)} for name in order}
+        rigs = {name: {"plugins": sorted(self.rigs[name], key=str.casefold), "rules": self.rules.get(name)}
+                for name in order}
         save_config({"default": [name for name in self.order() if name in self.default], "clones": self.clones,
                      "rigs": rigs, "dismissed": sorted(self.dismissed, key=plugin_order)})
         self.dirty = False

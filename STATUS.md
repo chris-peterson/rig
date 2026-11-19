@@ -3,17 +3,17 @@
 Tracking status of the requirements declared in [`SPEC.md`](SPEC.md).
 Maintained by `/sextant:spec-status`.
 
-**Last audit:** 2026-11-15
+**Last audit:** 2026-11-18
 **Spec version:** root SPEC.md (unversioned)
 **Plugin version:** unreleased
-**Coverage:** 90 Covered, 0 Partial, 0 Missing/Contradicts
+**Coverage:** 93 Covered, 0 Partial, 0 Missing/Contradicts
 **Evidence pointers:** file
 
 ## Status by category
 
 | Prefix | Count | Status | Notes |
 |--------|------:|--------|-------|
-| RIG-01..17 | 17 | All Covered | `scripts/rig` (`load_config`, `take_rigs`, `plan`, `overlay`, `stock_args`, `turn_off_user_plugins`, `cmd_list`, `graph_of`, `Graph`), tests in `tests/test_rig.py`. Rigs are flat: `base` loads in every launch, the named rigs add to it, and `full` is every plugin installed for the working directory. RIG-04 is a per-launch `--settings` overlay that names only the launch's plugins and pinned plugins' installed copies, since a `--settings` value outranks every settings file. RIG-12 edits `~/.claude/settings.json` as text to keep its blank-line groups. `/plugin enable` loading mid-session under the new overlay hasn't been tried |
+| RIG-01..20 | 20 | All Covered | `scripts/rig` (`load_config`, `check_rules`, `default_rigs`, `path_matches`, `repo_files`, `rule_match`, `take_rigs`, `plan`, `overlay`, `stock_args`, `turn_off_user_plugins`, `cmd_list`, `graph_of`, `Graph`), tests in `tests/test_rig.py`. Rigs are flat: `base` loads in every launch, the named rigs add to it, and `full` is every plugin installed for the working directory. RIG-04 is a per-launch `--settings` overlay that names only the launch's plugins and pinned plugins' installed copies, since a `--settings` value outranks every settings file. RIG-12 edits `~/.claude/settings.json` as text to keep its blank-line groups. RIG-18..20 match rules against the resolved working directory and `$PWD`, and list a repo's files once per launch with `git ls-files --cached --others --exclude-standard`; the globs support `*`, `?`, and `**`, not bracket classes or GitLab's extglob braces. `/plugin enable` loading mid-session under the new overlay hasn't been tried |
 | SETUP-01..06 | 8 | All Covered | `scripts/rig` (`RigEdits`, `setup`, `launch`), tests in `tests/test_rig.py`; SETUP-01 and SETUP-05 drive the editor through a pty. Includes SETUP-04a..b. SETUP-04a reads the settings file as text, since the blank lines don't survive a JSON parse. `claude plugin disable` rewrites the file without them (verified 2026-11-10, Claude Code project scope), so the groups last only in a file edited by hand |
 | EDITOR-01..14 | 14 | All Covered | `scripts/rig` (`RigEdits`, `editor_app`, `use_theme`), tests in `tests/test_rig.py` drive it headless with Textual's pilot, keys and clicks. The rig list draws its bracket with box characters down the right of each row; both screens use revdiff's Dracula colors, copied into `DRACULA` |
 | PIN-01..13 | 13 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. PIN-12's 📌 comes from `plugin_cell` and `pin_lines`, one each for a plugin's name and a pin's line, and the graph pads it as two cells (`cells`). PIN-08 uses `--plugin-dir`: the checkout loads as `<name>@inline` and the installed copy doesn't load, including when the overlay disables it (verified 2026-11-10). PIN-11 (`auto_mode_server_off`) works around anthropics/claude-code#95982 |
@@ -25,6 +25,14 @@ Maintained by `/sextant:spec-status`.
 | DOCTOR-01..05 | 5 | All Covered | `scripts/rig` (`cmd_doctor`, `shell_probe`), tests in `tests/test_rig.py` probe a new zsh in a throwaway HOME. On a live machine (2026-11-10) it caught a `~/.zcompdump` from before `_rig`, read by `compinit -C` |
 
 ## Audit history
+
+### 2026-11-18: Default rigs by rule
+
+STATUS.md updated: +3 IDs (RIG-18 rules make a rig a default where they match,
+RIG-19 `path` as git's `gitdir/i:`, RIG-20 `exists` as GitLab CI's
+`rules:exists`; all Covered); RIG-07, RIG-11, RIG-13, LAUNCH-02, and EDITOR-08
+reworded for rules, still Covered, and the default rigs concept now takes in the
+rigs whose rules match. Coverage 93 of 93.
 
 ### 2026-11-15: Hangup ends the full-screen apps
 
