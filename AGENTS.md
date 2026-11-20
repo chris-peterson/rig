@@ -13,7 +13,7 @@ requirement and the ledger in the same commit.
 ## Commands
 
 ```bash
-just test             # run the test suite, including completion parity
+just test             # run the test suite, including completion parity, and the mod's tests
 just demo             # run rig against a throwaway HOME and a stand-in claude
 just run <args>       # run rig from this checkout against your real setup
 just trial-on         # point the rig on PATH at this checkout; just trial-off reverts
@@ -34,7 +34,7 @@ plugin.yml               canonical descriptor: manifest, marketplace entry, docs
 scripts/rig              the CLI, one Python file run through `uv run --script`; holds the zsh completion
 scripts/trial-off.sh     what `just trial-off` runs: reinstalls the CLI from the newest plugin build
 commands/install-rig.md  the bootstrap that puts `rig` on PATH
-skills/switch/SKILL.md   /rig:switch, which runs `rig switch` with the session id
+hooks/switch.ts          the mod behind /rig: the picker in a pane, then `rig switch` and an exit
 hooks/hooks.yml          hook source; cli-freshness.sh reports a stale `rig` on PATH,
                          beacon-badge.sh puts the rigs on beacon's pane badge
 tests/                   unittest suite; a test covering a requirement names its ID

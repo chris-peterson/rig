@@ -70,9 +70,9 @@ marking the base rig and the default rigs, and naming the rule that makes a rig
 a default in the working directory.
 
 #### `RIG-08`
-If a rig names a plugin that is not installed, then the system shall list it
-on the launch confirmation, install it once the user confirms the launch, and
-refuse the launch if the user cancels.
+If a rig names a plugin that is not installed, then the system shall mark it
+in the picker, install it once the user launches, and refuse the launch if the
+user cancels.
 
 #### `RIG-09`
 If a rig names a plugin that is not installed and no one is at a terminal to
@@ -270,7 +270,7 @@ with when each was pinned.
 
 #### `PIN-07`
 When an interactive launch starts inside a pinned checkout, the system shall
-offer that pin on the launch confirmation, selected.
+offer that pin in the picker, loading.
 
 #### `PIN-08`
 When a launch's rigs include a pinned plugin, the system shall load the pinned
@@ -278,7 +278,7 @@ checkout in place of the installed copy.
 
 #### `PIN-09`
 When an interactive launch's rigs do not include a pinned plugin, the system
-shall offer that pin on the launch confirmation, unselected.
+shall offer that pin in the picker, not loading.
 
 #### `PIN-10`
 If a launch's rigs do not include a pinned plugin and no one is at a terminal
@@ -297,7 +297,7 @@ say so before Claude Code starts.
 #### `PIN-12`
 The system shall mark each pinned plugin with 📌 wherever it lists plugins or
 pins: the launch summary, `rig pin`, `rig list`, the graph, the picker, the
-launch confirmation, and the rig editor.
+switch pane, and the rig editor.
 
 #### `PIN-13`
 When the user toggles a pinned plugin's row in the picker, the system shall
@@ -336,9 +336,10 @@ Claude Code with the arguments unchanged, without loading a rig.
 
 #### `LAUNCH-05`
 When an interactive launch has a plugin to install or a pin to choose, the
-system shall show one launch confirmation: the rigs, which the user can add to
-or take from, the plugins they load, and the pins they leave to choose,
-launching on enter and refusing the launch on `q`.
+system shall open the picker as `--select` does, with its cursor on the first
+pin to choose, else the first plugin to install, and a notice naming each: a
+pin that holds the working directory and whether its checkout loads, a pin the
+rigs leave out, and the plugins that install at launch.
 
 #### `LAUNCH-06`
 While an interactive launch runs, the system shall stay running until Claude
@@ -389,36 +390,40 @@ the system shall put the session's rigs on beacon's pane badge, separated by
 ` ✦ `.
 
 #### `LAUNCH-15`
-If the terminal goes away while the launch confirmation, the picker, or the rig
-editor is open, then the system shall exit as a hangup ends it, even when it
+If the terminal goes away while the picker or the rig editor is open, then the system shall exit as a hangup ends it, even when it
 started with SIGHUP ignored.
 
 ### `SWITCH`
 Switching rigs mid-session
 
 #### `SWITCH-01`
-When the user runs `/rig:switch <rig>...` in a session rig launched at a
-terminal, the system shall record the switch and tell the user to exit Claude
-Code.
+When the user runs `/rig <rig>...` in a session rig launched at a
+terminal, the system shall record the switch and exit Claude Code.
 
 #### `SWITCH-02`
 When Claude Code exits after a recorded switch, the system shall launch the
-named rigs resuming the same conversation, with the launch's sandbox state, and
-offer pins as any launch does. The resumed conversation shall open with a turn
+named rigs resuming the same conversation, with the launch's sandbox state:
+with the plugins and pins chosen in the switch pane, without asking again, or,
+for a switch that names rigs, offering pins as any launch does. The resumed conversation shall open with a turn
 saying the switch is done.
 
 #### `SWITCH-03`
-If the user runs `/rig:switch <rig>...` in a session rig did not launch at a
-terminal, then the system shall refuse the switch, naming the command that
-resumes the conversation with those rigs.
+If the user runs `/rig`, naming rigs or not, in a session rig did not
+launch at a terminal, then the system shall refuse the switch, naming the
+command that resumes the conversation with those rigs, or with the session's
+own.
 
 #### `SWITCH-04`
-If `/rig:switch` names a rig that isn't defined, then the system shall refuse
+If `/rig` names a rig that isn't defined, then the system shall refuse
 the switch, naming the rigs.
 
 #### `SWITCH-05`
-When the user runs `/rig:switch` naming no rig, the system shall list the rigs,
-marking the ones the session uses.
+When the user runs `/rig` naming no rig in a session rig launched at a
+terminal, the system shall open a pane with the picker's graph, set to the
+rigs, plugins, and pins the session loads, toggling them as the picker does,
+with a toast naming each pin that holds the working directory and whether its
+checkout loads; it shall record the switch and exit Claude Code on `l`, and
+close without a switch on escape or `q`.
 
 ### `SHELL`
 Shell integration

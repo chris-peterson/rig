@@ -461,60 +461,99 @@ def launch(selected: list[str] | None, args: list[str]) -> None:
     if not interactive(args):
         exec_claude(claude_args(selected, args, sandbox_flag, reasons=reasons)[1])
     request = switch_file()
+    picks = None
     try:
         while True:
-            selected, arguments = claude_args(selected, args, sandbox_flag, select_flag, reasons)
+            selected, arguments, chose = claude_args(selected, args, sandbox_flag, select_flag, reasons, picks)
             select_flag, reasons = False, {}
-            status = run_claude(arguments, {SWITCH_ENV: str(request), CURRENT_RIG_ENV: " ".join(selected) or BASE})
+            status = run_claude(arguments, {SWITCH_ENV: str(request), CURRENT_RIG_ENV: " ".join(selected) or BASE,
+                                            PICKS_ENV: json.dumps(chose)})
             switch = take_switch(request)
             if switch is None:
                 raise SystemExit(status)
             selected, args = switch["rigs"], ["--resume", switch["session"], switched_prompt(switch["rigs"])]
-            print(f"{PROG}: switching to {label(selected)}, resuming this conversation", file=sys.stderr)
+            picks = switch if "pins" in switch else None
+            print(f"{PROG}: switching to {label(selected, *picked(picks))}, resuming this conversation",
+                  file=sys.stderr)
     finally:
         request.unlink(missing_ok=True)
 
 
-def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select: bool = False, reasons: dict = {}) -> tuple[list[str], list[str]]:
-    """RIG-04, RIG-08, RIG-09, RIG-12, PIN-10, LAUNCH-01..02, LAUNCH-05, LAUNCH-07: the rigs the launch uses and
-    the arguments that start Claude Code with them, once their plugins are installed and the pins chosen. The
-    reasons are the rules that made rigs defaults, for the ones still chosen."""
+def picked(picks: dict | None) -> tuple[list[str], list[str]]:
+    """LAUNCH-11, SWITCH-02: the plugins a launch picks on their own and takes out, from a switch's picks."""
+    return (list(picks.get("added", [])), list(picks.get("removed", []))) if picks else ([], [])
+
+
+def confirmation(current: Plan, rows: list[str]) -> tuple[str, str | None]:
+    """LAUNCH-05: why the picker opened unasked, one line for each pin left to choose and one for the plugins
+    that install, and the row to put the cursor on: the first pin, else the first plugin to install."""
+    lines, rows_named = [], []
+    for offer in current.offered:
+        if offer.locked:
+            continue
+        name = offer.pin["plugin"]
+        if offer.here:
+            loads = "its checkout loads" if offer.selected else "the installed copy loads"
+            lines.append(f"{PIN} {name} holds this folder, so {loads}.")
+        else:
+            lines.append(f"{PIN} {name} isn't in these rigs, so its checkout loads only if you choose it.")
+        rows_named.append(next((row for row in rows if row.split("@")[0] == name), None))
+    if current.missing:
+        lines.append(f"installs at launch: {', '.join(current.missing)}")
+        rows_named += [row for row in rows if row in current.missing]
+    lines.append("Enter on a row changes it; l launches, q cancels.")
+    return "\n".join(lines), next((row for row in rows_named if row), None)
+
+
+def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select: bool = False, reasons: dict = {},
+                picks: dict | None = None) -> tuple[list[str], list[str], dict]:
+    """RIG-04, RIG-08, RIG-09, RIG-12, PIN-10, LAUNCH-01..02, LAUNCH-05, LAUNCH-07, SWITCH-02: the rigs the launch
+    uses, the arguments that start Claude Code with them once their plugins are installed and the pins chosen,
+    and what was picked beyond the rigs. The reasons are the rules that made rigs defaults, for the ones still
+    chosen; the picks are a switch's, chosen in the session, so the launch doesn't ask again."""
     config = load_config()
     rigs = config["rigs"]
     unknown = [name for name in selected if name not in rigs and name not in (FULL, NONE)]
     if unknown:
         fail(f"no rig named {', '.join(unknown)}. Rigs: {', '.join(rig_order(rigs))}")
     if NONE in selected:
-        return selected, stock_args(selected, args, sandbox_flag)
+        return selected, stock_args(selected, args, sandbox_flag), {"added": [], "removed": [], "pins": {}}
     cwd = Path.cwd()
     installed = installed_for(cwd)
     pins = checked_pins()
-    current = plan(selected, rigs, installed, pins, cwd)
-    if not interactive(args):
+    current = plan(selected, rigs, installed, pins, cwd, *picked(picks))
+    if picks is not None:
+        chosen = [(offer.pin, offer.locked or picks["pins"].get(offer.pin["path"], offer.selected))
+                  for offer in current.offered]
+    elif not interactive(args):
         if current.missing:
             fail(f"{label(selected)} names plugins that aren't installed: {', '.join(current.missing)}. "
                  "Install them with `claude plugin install <plugin>`, or launch at a terminal to be asked.")
         chosen = [(offer.pin, offer.in_rig) for offer in current.offered]
     elif select or current.missing or any(not offer.locked for offer in current.offered):
-        plan_for = lambda names, *picks: plan(names, rigs, installed, pins, cwd, *picks)
-        if not select:
-            answer = run_app(launch_app(plan_for, rig_order(rigs), current, sandbox_flag))
-        while select:
+        plan_for = lambda names, *more: plan(names, rigs, installed, pins, cwd, *more)
+        notice, focus = "", None
+        while True:
             everything = sorted(installed, key=str.casefold)
             here = default_rigs(config, cwd)
             columns = [{"name": name, "default": name in here,
                         "plugins": everything if name == FULL else rigs[name]["plugins"]} for name in rig_order(rigs)]
-            answer = run_app(select_app(plan_for, columns, everything, pins, current, sandbox_flag, invocation()))
+            if not select:
+                notice, focus = confirmation(current, graph_of(columns, everything, pins).rows)
+                select = True
+            answer = run_app(select_app(plan_for, columns, everything, pins, current, sandbox_flag, invocation(),
+                                        notice, focus))
             if answer is None or answer[0] != EDIT:
                 break
+            notice, focus = "", None
             setup()
             config = load_config()
             rigs = config["rigs"]
             current = plan([name for name in answer[1] if name in rigs or name == FULL], rigs, installed, pins, cwd, *answer[2:])
         if answer is None:
             fail("launch cancelled.")
-        selected, chosen, *picks = answer
-        current = plan(selected, rigs, installed, pins, cwd, *picks)
+        selected, chosen, *more = answer
+        current = plan(selected, rigs, installed, pins, cwd, *more)
     else:
         chosen = [(offer.pin, True) for offer in current.offered]
     plugins = list(current.sources)
@@ -529,7 +568,8 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
           f"sandbox: {'on' if sandbox_flag else 'off'}", sep="\n", file=sys.stderr)
     plugin_dirs = [arg for pin in loaded for arg in ("--plugin-dir", pin["path"])]
     settings = overlay(enabled, replaced, known_plugin_ids(cwd), sandbox_flag, current.removed)
-    return selected, ["--settings", json.dumps(settings), *plugin_dirs, *args]
+    chose = {"added": current.added, "removed": current.removed, "pins": {pin["path"]: load for pin, load in chosen}}
+    return selected, ["--settings", json.dumps(settings), *plugin_dirs, *args], chose
 
 
 def stock_args(selected: list[str], args: list[str], sandbox_flag: bool) -> list[str]:
@@ -555,6 +595,7 @@ def stock_args(selected: list[str], args: list[str], sandbox_flag: bool) -> list
 
 SWITCH_ENV = "RIG_SWITCH_FILE"
 CURRENT_RIG_ENV = "RIG_CURRENT"
+PICKS_ENV = "RIG_PICKS"  # what a launch picked beyond its rigs, as JSON: plugins added and taken out, each pin's load
 
 
 def switch_file() -> Path:
@@ -630,36 +671,95 @@ def run_app(app):
         signal.signal(signal.SIGHUP, previous)
 
 
-def cmd_switch(args: list[str]) -> int:
-    """SWITCH-01, SWITCH-03..05: record the rigs a session switches to once Claude Code exits."""
-    session = None
-    if "--session" in args:
-        at = args.index("--session")
-        session = args[at + 1] if at + 1 < len(args) else None
-        args = args[:at] + args[at + 2:]
-    if not session:
-        fail("switch takes rig names and the session id: rig switch [<rig>...] --session <id>")
-    config = load_config()
+def session_picks() -> dict | None:
+    """What the launch of this session picked beyond its rigs (PICKS_ENV), or None outside a session rig launched."""
+    try:
+        picks = json.loads(os.environ.get(PICKS_ENV) or "null")
+    except json.JSONDecodeError:
+        return None
+    return picks if isinstance(picks, dict) else None
+
+
+def switch_state(config: dict | None) -> dict:
+    """SWITCH-05: what the switch pane draws: the rigs as the picker shows them, the installed plugins, the pins,
+    the ones holding the working directory, and what this session loads now."""
+    cwd = Path.cwd()
     rigs = config["rigs"] if config else {}
-    launched = os.environ.get(CURRENT_RIG_ENV)
-    current = selection((launched or "").split())
-    if not args:
-        for name in rig_order(rigs) if rigs else []:
-            in_use = launched is not None and (name == BASE or name in current)
-            print(f"{name}{' (this session)' if in_use else ''}")
+    installed = sorted(installed_for(cwd), key=str.casefold)
+    here = default_rigs(config, cwd) if config else {}
+    pins = read_pins()
+    current = selection((os.environ.get(CURRENT_RIG_ENV) or "").split())
+    picks = session_picks() or {}
+    added, removed = picked(picks)
+    offered = plan([n for n in current if n in rigs or n == FULL], rigs, set(installed), pins, cwd, added, removed).offered \
+        if BASE in rigs else []
+    loads = {offer.pin["path"]: offer.locked or picks.get("pins", {}).get(offer.pin["path"], offer.selected)
+             for offer in offered}
+    return {
+        "launched": bool(os.environ.get(SWITCH_ENV)),
+        "rigs": [{"name": name, "built_in": name in BUILT_IN, "default": name in here,
+                  "plugins": installed if name == FULL else rigs[name]["plugins"]}
+                 for name in (rig_order(rigs) if rigs else [])],
+        "installed": installed,
+        "pins": [{"plugin": pin["plugin"], "path": pin["path"], "display": display(pin["path"]),
+                  "age": age(pin["pinned_at"])} for pin in pins],
+        "here": [pin["path"] for pin in pins if cwd.is_relative_to(Path(pin["path"]))],
+        "current": {"rigs": current, "added": added, "removed": removed, "pins": loads},
+    }
+
+
+def take_option(args: list[str], flag: str) -> tuple[str | None, list[str]]:
+    """The value after a flag, and the arguments without the two."""
+    if flag not in args:
+        return None, args
+    at = args.index(flag)
+    return (args[at + 1] if at + 1 < len(args) else ""), args[:at] + args[at + 2:]
+
+
+def cmd_switch(args: list[str]) -> int:
+    """SWITCH-01, SWITCH-03..05: what the switch pane draws (--state), or record the rigs, and with --picks the
+    plugins and pins, a session switches to once Claude Code exits."""
+    config = load_config()
+    state, args = take_flag(args, "--state")
+    if state:
+        print(json.dumps(switch_state(config), indent=2))
         return 0
-    selected, rest = take_rigs(args, rigs)
-    if rest:
-        fail(f"no rig named {rest[0]}. Rigs: {', '.join(rig_order(rigs)) if rigs else 'none'}")
+    session, args = take_option(args, "--session")
+    raw, args = take_option(args, "--picks")
+    if not session or (raw is None) == (not args):
+        fail("switch takes the rigs, or the pane's --picks, and the session id: "
+             "rig switch <rig>... --session <id>, rig switch --picks <json> --session <id>")
+    rigs = config["rigs"] if config else {}
+    picks = None
+    if raw is not None:
+        try:
+            picks = json.loads(raw)
+            selected = selection(picks["rigs"])
+            picks = {"added": list(picks.get("added", [])), "removed": list(picks.get("removed", [])),
+                     "pins": dict(picks.get("pins", {}))}
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+            fail(f"--picks takes JSON: {{\"rigs\": [...], \"added\": [...], \"removed\": [...], \"pins\": {{...}}}}")
+        unknown = [name for name in selected if name not in rigs and name != FULL]
+        if unknown:
+            fail(f"no rig named {', '.join(unknown)}. Rigs: {', '.join(rig_order(rigs)) if rigs else 'none'}")
+    else:
+        selected, rest = take_rigs(args, rigs)
+        if rest:
+            fail(f"no rig named {rest[0]}. Rigs: {', '.join(rig_order(rigs)) if rigs else 'none'}")
+    to = label(selected, *picked(picks))
     request = os.environ.get(SWITCH_ENV)
     if not request:
         fail(f"this session wasn't launched by rig at a terminal, so rig can't relaunch it. Exit Claude Code, "
              f"then run: rig use {' '.join(selected) or BASE} --resume {session}")
-    if selected == current:
-        print(f"{PROG}: this session already uses {label(selected)}.")
+    current = selection((os.environ.get(CURRENT_RIG_ENV) or "").split())
+    now = session_picks() or {}
+    if selected == current and (picks is None or picks == {"added": now.get("added", []),
+                                                           "removed": now.get("removed", []),
+                                                           "pins": now.get("pins", {})}):
+        print(f"{PROG}: this session already uses {to}.")
         return 0
-    write_yaml(Path(request), {"rigs": selected, "session": session})
-    print(f"{PROG}: exit Claude Code (/exit), and rig relaunches this conversation with {label(selected)}.")
+    write_yaml(Path(request), {"rigs": selected, "session": session, **(picks or {})})
+    print(f"{PROG}: relaunching this conversation with {to}.")
     return 0
 
 
@@ -1003,7 +1103,7 @@ class PinOffer(NamedTuple):
 
     @property
     def selected(self) -> bool:
-        """PIN-07..09: selected on the launch confirmation when the rigs include it or the launch starts inside it."""
+        """PIN-07..09: offered loading in the picker when the rigs include it or the launch starts inside it."""
         return self.in_rig or self.here
 
     @property
@@ -1022,114 +1122,6 @@ def checked_pins() -> list[dict]:
     return pins
 
 
-def launch_app(plan_for, names: list[str], initial: Plan, sandbox: bool):
-    """LAUNCH-05: one confirmation for the launch: the rigs, which the user can add to or take from, the plugins
-    they load, and the pins they leave to choose. Exits with (the rigs, each pin and whether to load it), or None
-    when cancelled."""
-    from rich.text import Text
-    from textual.app import App, ComposeResult
-    from textual.binding import Binding
-    from textual.containers import VerticalScroll
-    from textual.widgets import Footer, SelectionList, Static
-    from textual.widgets.selection_list import Selection
-
-    def rig_option(name: str) -> Selection:
-        text = Text.assemble((name, f"italic {FIXED}"), (f"  {BUILT_IN[name]}", MUTED)) if name in BUILT_IN else Text(name)
-        return Selection(text, name, name == BASE or name in initial.selected, disabled=name == BASE)
-
-    def plugin_line(current: Plan, plugin_id: str) -> Text:
-        line = Text.assemble(plugin_id, (f"  from {current.sources[plugin_id]}", MUTED))
-        offer = next((o for o in current.offered if o.in_rig and o.pin["plugin"] == plugin_id.split("@")[0]), None)
-        if offer and offer.locked:
-            line.append(f"  {PIN} {display(offer.pin['path'])}", NOTE)
-        elif offer:
-            line.append(f"  {PIN} here; choose below", NOTE)
-        if plugin_id in current.missing:
-            line.append("  not installed; installs at launch", WARN)
-        return line
-
-    def pin_option(index: int, offer: PinOffer, load: bool) -> Selection:
-        label_text = Text.assemble(f"{PIN} {offer.pin['plugin']}", (f"  {display(offer.pin['path'])}", MUTED))
-        if offer.in_rig:
-            label_text.append("  holds this folder; unselected, the installed copy loads", MUTED)
-        elif offer.here:
-            label_text.append("  holds this folder", MUTED)
-        return Selection(label_text, index, load)
-
-    class LaunchConfirmation(App):
-        TITLE = "rig"
-        ENABLE_COMMAND_PALETTE = False
-        BINDINGS = [Binding("enter", "launch", "Launch", priority=True),
-                    Binding("q", "cancel", "Cancel")]
-        CSS = """
-        Screen { border: round $border; border-title-align: center; border-title-color: $text; }
-        #rigs { height: auto; max-height: 40%; border: round $border-blurred; }
-        #plugins { height: auto; max-height: 40%; border: round $border-blurred; padding: 0 1; }
-        #pins { height: auto; max-height: 1fr; border: round $border-blurred; }
-        #rigs:focus, #pins:focus { border: round $border; }
-        #sandbox { padding: 0 1; }
-        """
-
-        def __init__(self):
-            super().__init__()
-            use_theme(self)
-            self.current = initial
-            self.pin_choices: dict[str, bool] = {}
-
-        def compose(self) -> ComposeResult:
-            rigs = SelectionList(*(rig_option(name) for name in names), id="rigs")
-            rigs.border_title = "rigs (space adds or takes away)"
-            yield rigs
-            with VerticalScroll(id="plugins") as panel:
-                panel.can_focus = False
-                yield Static(id="plugin-lines")
-            pins = SelectionList(id="pins")
-            pins.border_title = f"{PIN} to load (space toggles)"
-            yield pins
-            yield Static(f"sandbox: {'on' if sandbox else 'off'}", id="sandbox")
-            yield Footer()
-
-        def on_mount(self) -> None:
-            self.screen.border_title = "rig: launch"
-            self.show()
-            pins = self.query_one("#pins", SelectionList)
-            if pins.display:
-                pins.focus()
-
-        def load(self, offer: PinOffer) -> bool:
-            return offer.locked or self.pin_choices.get(offer.pin["path"], offer.selected)
-
-        def show(self) -> None:
-            current = self.current
-            self.query_one("#plugins").border_title = summary(current)
-            lines = [plugin_line(current, plugin_id) for plugin_id in current.sources]
-            self.query_one("#plugin-lines", Static).update(Text("\n").join(lines) or Text("no plugins", "dim"))
-            pins = self.query_one("#pins", SelectionList)
-            pins.clear_options()
-            pins.add_options([pin_option(index, offer, self.load(offer))
-                              for index, offer in enumerate(current.offered) if not offer.locked])
-            pins.display = pins.option_count > 0
-            if pins.option_count:
-                pins.highlighted = 0
-
-        def on_selection_list_selection_toggled(self, event: SelectionList.SelectionToggled) -> None:
-            if event.selection_list.id == "rigs":
-                chosen = set(event.selection_list.selected)
-                self.current = plan_for([name for name in names if name in chosen and name != BASE])
-                self.show()
-            else:
-                offer = self.current.offered[event.selection.value]
-                self.pin_choices[offer.pin["path"]] = event.selection.value in event.selection_list.selected
-
-        def action_launch(self) -> None:
-            self.exit((self.current.selected, [(offer.pin, self.load(offer)) for offer in self.current.offered]))
-
-        def action_cancel(self) -> None:
-            self.exit(None)
-
-    return LaunchConfirmation()
-
-
 CURSOR_ROW = "#44475a"  # Dracula's current-line color
 EDIT = "edit"  # what the picker exits with to open the rig editor, along with what's chosen so far
 ON, PARTIAL, OFF = "on", "partial", "off"  # how much of a rig the picker's launch loads
@@ -1146,10 +1138,12 @@ def invocation() -> str:
     return shlex.join(args if args[:1] == ["claude"] else [PROG, *args])
 
 
-def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[dict], initial: Plan, sandbox: bool, title: str = f"{PROG} --select"):
+def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[dict], initial: Plan, sandbox: bool,
+               title: str = f"{PROG} --select", notice: str = "", focus: str | None = None):
     """LAUNCH-07..11: pick the rigs on the graph `rig list --graph` prints, `full` among them. One cursor sits
     on a rig's name or a plugin's row, and space, enter, or a click toggles what it's on: a rig (`full` alone)
-    or a plugin, a pinned one opening its pin. e opens the rig editor, and l or the 🚀 launches. The header is the command line that opened it. Exits with (the rigs, each pin and
+    or a plugin, a pinned one opening its pin. e opens the rig editor, and l or the 🚀 launches. The header is the command line that opened it.
+    LAUNCH-05: opened unasked, it shows the notice saying why and starts with the cursor on the focus row. Exits with (the rigs, each pin and
     whether to load it, the plugins picked, the plugins taken out), or (EDIT, the rigs, picked, taken out), or
     None when cancelled."""
     from rich.text import Text
@@ -1431,8 +1425,14 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
         def on_mount(self) -> None:
             self.screen.add_class("picker")
             self.screen.border_title = title
+            picker = self.query_one(Picker)
+            if focus in layout.rows:
+                picker.row = layout.rows.index(focus)
             self.show()
-            self.query_one(Picker).focus()
+            picker.focus()
+            picker.reveal()
+            if notice:
+                self.notify(notice, title="rig", timeout=12)
 
         def offer(self, plugin_id: str) -> PinOffer | None:
             return next((o for o in self.current.offered if o.pin["plugin"] == plugin_id.split("@")[0]), None)

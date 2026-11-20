@@ -50,8 +50,11 @@ FAKE_CLAUDE = textwrap.dedent('''\
         f.write(json.dumps(os.environ.get("CLAUDE_CODE_AUTO_MODE_SERVER")) + "\\n")
     if os.environ.get("RIG_TEST_SWITCH_TO") and "--resume" not in sys.argv:
         import subprocess
-        subprocess.run([sys.executable, os.environ["RIG_TEST_RIG"], "switch", os.environ["RIG_TEST_SWITCH_TO"],
-                        "--session", "abc"], check=True)
+        to = os.environ["RIG_TEST_SWITCH_TO"]
+        how = ["--picks", to] if to.startswith("{{") else [to]
+        subprocess.run([sys.executable, os.environ["RIG_TEST_RIG"], "switch", *how, "--session", "abc"], check=True)
+    with open(os.environ["RIG_TEST_ARGV"] + ".picks", "a") as f:
+        f.write(json.dumps(os.environ.get("RIG_PICKS")) + "\\n")
     sys.exit(int(os.environ.get("RIG_TEST_EXIT", "0")))
     ''')
 
@@ -332,8 +335,9 @@ class Rigs(RigCase):
 
     def test_rig_08_missing_plugin_installed_on_launch(self):
         self.write_installed("a@m")
-        status, output = self.rig_tty("claude", keys=["enter"])
+        status, output = self.rig_tty("claude", keys=["l"])
         self.assertEqual(status, 0, output)
+        self.assertIn("installs at launch: b@m", output)
         self.assertEqual(self.claude_calls()[0], ["plugin", "install", "b@m"])
         self.assertEqual(self.claude_calls()[1][0], "--settings")
 
@@ -555,7 +559,7 @@ class Switch(RigCase):
         self.env["RIG_TEST_SWITCH_TO"] = "web"
         status, output = self.rig_tty("claude", "--sandbox", "fix the bug")
         self.assertEqual(status, 0, output)
-        self.assertIn("rig relaunches this conversation with base + web", output)
+        self.assertIn("rig: relaunching this conversation with base + web", output)
         (first, first_args), (second, second_args) = self.launches()
         self.assertEqual((first, first_args), ({"a@m", "b@m"}, ["fix the bug"]))
         self.assertEqual((second, second_args[:2]), ({"a@m", "b@m", "c@n"}, ["--resume", "abc"]))
@@ -580,9 +584,51 @@ class Switch(RigCase):
         self.assertIn("no rig named nope. Rigs: base, web, full", result.stderr)
         self.assertFalse((self.home / "s.yml").exists())
 
-    def test_switch_05_no_rig_lists_rigs(self):
-        result = self.rig("switch", "--session", "abc", env={"RIG_CURRENT": "web"})
-        self.assertEqual(result.stdout, "base (this session)\nweb (this session)\nfull\n")
+    def test_switch_05_state_is_what_the_pane_draws(self):
+        picks = {"added": ["c@n"], "removed": [], "pins": {}}
+        result = self.rig("switch", "--state", env={"RIG_CURRENT": "base", "RIG_PICKS": json.dumps(picks),
+                                                    "RIG_SWITCH_FILE": str(self.home / "s.yml")})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = json.loads(result.stdout)
+        self.assertTrue(state["launched"])
+        self.assertEqual([(r["name"], r["built_in"], r["plugins"]) for r in state["rigs"]],
+                         [("base", True, ["a@m", "b@m"]), ("web", False, ["c@n"]), ("full", True, ["a@m", "b@m", "c@n"])])
+        self.assertEqual(state["installed"], ["a@m", "b@m", "c@n"])
+        self.assertEqual(state["current"], {"rigs": [], "added": ["c@n"], "removed": [], "pins": {}})
+        self.assertEqual((state["pins"], state["here"]), ([], []))
+
+    def test_switch_05_state_outside_a_rig_launch(self):
+        state = json.loads(self.rig("switch", "--state").stdout)
+        self.assertFalse(state["launched"])
+
+    def test_switch_05_pane_picks_recorded(self):
+        request = self.home / "s.yml"
+        picks = {"rigs": ["web"], "added": [], "removed": ["b@m"], "pins": {}}
+        result = self.rig("switch", "--picks", json.dumps(picks), "--session", "abc",
+                          env={"RIG_SWITCH_FILE": str(request), "RIG_CURRENT": "base"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("relaunching this conversation with base + web - b@m", result.stdout)
+        import yaml
+        self.assertEqual(yaml.safe_load(request.read_text()),
+                         {"rigs": ["web"], "added": [], "removed": ["b@m"], "pins": {}, "session": "abc"})
+
+    def test_switch_05_pane_picks_unknown_rig_refused(self):
+        picks = {"rigs": ["nope"], "added": [], "removed": [], "pins": {}}
+        result = self.rig("switch", "--picks", json.dumps(picks), "--session", "abc",
+                          env={"RIG_SWITCH_FILE": str(self.home / "s.yml")})
+        self.assertIn("no rig named nope", result.stderr)
+        self.assertFalse((self.home / "s.yml").exists())
+
+    def test_switch_02_pane_picks_relaunch_without_asking(self):
+        self.env["RIG_TEST_SWITCH_TO"] = json.dumps({"rigs": [], "added": ["c@n"], "removed": ["a@m"], "pins": {}})
+        status, output = self.rig_tty("claude")
+        self.assertEqual(status, 0, output)
+        self.assertNotIn(ALT_SCREEN.decode(), output)
+        self.assertIn("switching to base + c@n - a@m", output)
+        (_, _), (second, second_args) = self.launches()
+        self.assertEqual((second, second_args[:2]), ({"b@m", "c@n"}, ["--resume", "abc"]))
+        seen = [json.loads(line) for line in Path(f"{self.argv_log}.picks").read_text().splitlines()]
+        self.assertEqual(json.loads(seen[1]), {"added": ["c@n"], "removed": ["a@m"], "pins": {}})
 
     def test_switch_01_records_several_rigs(self):
         request = self.home / "s.yml"
@@ -596,7 +642,7 @@ class Switch(RigCase):
         result = self.rig("switch", "web", "--session", "abc",
                           env={"RIG_SWITCH_FILE": str(request), "RIG_CURRENT": "base"})
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("/exit", result.stdout)
+        self.assertIn("rig: relaunching this conversation with base + web.", result.stdout)
         import yaml
         self.assertEqual(yaml.safe_load(request.read_text()), {"rigs": ["web"], "session": "abc"})
 
@@ -975,8 +1021,9 @@ class Pins(RigCase):
 
     def test_pin_07_pin_holding_cwd_can_be_left_out(self):
         self.rig("pin", str(self.ckout))
-        status, output = self.rig_tty("claude", keys=["space", "enter"], cwd=self.ckout)
+        status, output = self.rig_tty("claude", keys=["enter", "tab", "tab", "enter", "l"], cwd=self.ckout)
         self.assertEqual(status, 0, output)
+        self.assertIn("b holds this folder, so its checkout loads", output)
         overlay, args = self.launched()
         self.assertNotIn("--plugin-dir", args)
         self.assertIs(overlay["enabledPlugins"]["b@m"], True)
@@ -1022,8 +1069,9 @@ class Pins(RigCase):
 
     def test_pin_09_pin_outside_rig_can_be_loaded(self):
         self.rig("pin", str(self.checkout("x")))
-        status, output = self.rig_tty("claude", keys=["space", "enter"])
+        status, output = self.rig_tty("claude", keys=["enter", "tab", "tab", "enter", "l"])
         self.assertEqual(status, 0, output)
+        self.assertIn("x isn't in these rigs", output)
         self.assertIn("--plugin-dir", self.launched()[1])
 
     def test_launch_05_nothing_to_choose_launches_without_confirmation(self):
@@ -1794,87 +1842,6 @@ class Editor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.saved()["rigs"]["base"], {"plugins": ["b@m"]})
 
 
-class LaunchConfirmation(unittest.IsolatedAsyncioTestCase):
-    """The launch confirmation on screen, driven by keys."""
-
-    rig = load_rig()
-    RIGS = {"base": {"plugins": ["a@m", "inrig@m"]}, "web": {"plugins": ["here@m", "z@m"]}}
-    INSTALLED = {"a@m", "inrig@m", "here@m", "outside@m"}
-
-    def running(self):
-        pin = lambda name: {"plugin": name, "path": f"/src/{name}", "pinned_at": "2026-01-01T00:00:00+00:00"}
-        pins = [pin("inrig"), pin("here"), pin("outside")]
-        plan_for = lambda names: self.rig.plan(names, self.RIGS, self.INSTALLED, pins, Path("/src/here"))
-        app = self.rig.launch_app(plan_for, self.rig.rig_order(self.RIGS), plan_for(["web"]), False)
-        return app, app.run_test(size=(110, 40))
-
-    def choices(self, app) -> dict[str, bool]:
-        return {pin["plugin"]: load for pin, load in app.return_value[1]}
-
-    def shown(self, app) -> str:
-        return str(app.query_one("#plugin-lines").render())
-
-    async def test_launch_05_rigs_and_their_plugins_shown(self):
-        app, running = self.running()
-        async with running as pilot:
-            await pilot.pause()
-            rigs = app.query_one("#rigs")
-            rows = [rigs.get_option_at_index(i) for i in range(rigs.option_count)]
-            self.assertEqual([(r.value, r.value in rigs.selected, r.disabled) for r in rows],
-                             [("base", True, True), ("web", True, False), ("full", False, False)])
-            self.assertEqual(app.query_one("#plugins").border_title, "base + web: 4 plugins")
-            self.assertIn("a@m  from base", self.shown(app))
-            self.assertIn("inrig@m  from base  📌 /src/inrig", self.shown(app))
-            self.assertIn("z@m  from web  not installed; installs at launch", self.shown(app))
-            await pilot.press("enter")
-        self.assertEqual(app.return_value[0], ["web"])
-        self.assertEqual(self.choices(app), {"inrig": True, "here": True, "outside": False})
-
-    async def test_launch_05_only_pins_the_rigs_leave_open_are_offered(self):
-        app, running = self.running()
-        async with running as pilot:
-            await pilot.pause()
-            listing = app.query_one("#pins")
-            values = [listing.get_option_at_index(i).value for i in range(listing.option_count)]
-            self.assertEqual(values, [1, 2])
-            self.assertEqual(listing.selected, [1])
-
-    async def test_launch_05_space_toggles_a_pin(self):
-        app, running = self.running()
-        async with running as pilot:
-            await pilot.pause()
-            await pilot.press("space", "down", "space", "enter")
-        self.assertEqual(self.choices(app), {"inrig": True, "here": False, "outside": True})
-
-    async def test_launch_05_changing_rigs_updates_plugins_and_keeps_pin_choices(self):
-        app, running = self.running()
-        async with running as pilot:
-            await pilot.pause()
-            await pilot.press("down", "space")
-            rigs = app.query_one("#rigs")
-            rigs.focus()
-            rigs.highlighted = 1
-            await pilot.press("space")
-            await pilot.pause()
-            self.assertEqual(app.query_one("#plugins").border_title, "base: 2 plugins")
-            self.assertEqual(app.query_one("#pins").selected, [1, 2])
-            await pilot.press("down", "space")
-            await pilot.pause()
-            self.assertEqual(app.query_one("#plugins").border_title, "all 4 plugins")
-            self.assertIn("outside@m  from full", self.shown(app))
-            self.assertNotIn("z@m", self.shown(app))
-            await pilot.press("enter")
-        self.assertEqual(app.return_value[0], ["full"])
-        self.assertEqual(self.choices(app), {"inrig": True, "here": True, "outside": True})
-
-    async def test_launch_05_q_cancels(self):
-        app, running = self.running()
-        async with running as pilot:
-            await pilot.pause()
-            await pilot.press("q")
-        self.assertIsNone(app.return_value)
-
-
 class Picker(unittest.IsolatedAsyncioTestCase):
     """The --select picker on screen, driven by keys and clicks."""
 
@@ -1891,7 +1858,7 @@ class Picker(unittest.IsolatedAsyncioTestCase):
         os.environ["HOME"] = self._home
         self._tmp.cleanup()
 
-    def running(self, selected=("web",)):
+    def running(self, selected=("web",), confirm=False):
         pin = lambda name: {"plugin": name, "path": f"/src/{name}", "pinned_at": "2026-01-01T00:00:00+00:00"}
         pins = [pin("inrig"), pin("here"), pin("outside")]
         self.rig.write_pins(pins)
@@ -1899,7 +1866,11 @@ class Picker(unittest.IsolatedAsyncioTestCase):
         columns = [{"name": name, "default": name == "web",
                     "plugins": self.INSTALLED if name == "full" else self.RIGS[name]["plugins"]}
                    for name in self.rig.rig_order(self.RIGS)]
-        app = self.rig.select_app(plan_for, columns, self.INSTALLED, pins, plan_for(list(selected)), False)
+        initial = plan_for(list(selected))
+        notice, focus = self.rig.confirmation(initial, self.rig.graph_of(columns, self.INSTALLED, pins).rows) \
+            if confirm else ("", None)
+        self.notice = notice
+        app = self.rig.select_app(plan_for, columns, self.INSTALLED, pins, initial, False, "rig --select", notice, focus)
         self.layout = app.LAYOUT
         return app, app.run_test(size=(110, 30))
 
@@ -1919,6 +1890,38 @@ class Picker(unittest.IsolatedAsyncioTestCase):
             if piece == column and text.strip():
                 return at + 1
             at += self.rig.cells(text)
+
+    async def test_launch_05_opened_unasked_says_why_with_the_cursor_on_the_pin(self):
+        app, running = self.running(confirm=True)
+        async with running as pilot:
+            await pilot.pause()
+            self.assertEqual(self.notice.splitlines(), [
+                "📌 here holds this folder, so its checkout loads.",
+                "📌 outside isn't in these rigs, so its checkout loads only if you choose it.",
+                "installs at launch: z@m",
+                "Enter on a row changes it; l launches, q cancels."])
+            self.assertEqual([n.message for n in app._notifications], [self.notice])
+            picker = app.query_one("#graph")
+            self.assertEqual(self.layout.rows[picker.row], "here@m")
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(type(app.screen).__name__, "PinDialog")
+            await pilot.press("escape", "l")
+        self.assertEqual(app.return_value[0], ["web"])
+        self.assertEqual(self.choices(app), {"inrig": True, "here": True, "outside": False})
+
+    async def test_launch_05_q_cancels(self):
+        app, running = self.running(confirm=True)
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("q")
+        self.assertIsNone(app.return_value)
+
+    def test_launch_05_nothing_left_open_says_nothing_but_the_keys(self):
+        pins = [{"plugin": "inrig", "path": "/src/inrig", "pinned_at": "2026-01-01T00:00:00+00:00"}]
+        current = self.rig.plan([], self.RIGS, set(self.INSTALLED), pins, Path("/elsewhere"))
+        self.assertEqual(self.rig.confirmation(current, ["a@m", "inrig@m"]),
+                         ("Enter on a row changes it; l launches, q cancels.", None))
 
     async def test_launch_07_the_graph_with_full_and_the_pins(self):
         app, running = self.running()

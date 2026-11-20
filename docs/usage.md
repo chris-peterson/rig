@@ -137,7 +137,7 @@ is a draft.
 | `q` | quit; with unsaved changes, asks first: `q` saves and quits, `d` discards, `escape` goes back |
 
 A rig names plugins as `<plugin>@<marketplace>`. When a rig names one that
-isn't installed, the launch confirmation (below) lists it, and launching
+isn't installed, the picker opens first (below) and marks it, and launching
 installs it first. With nobody at a terminal to confirm, the launch is refused.
 
 Everything rig doesn't recognize goes to Claude Code unchanged. Claude Code's
@@ -218,8 +218,8 @@ clones:
 ```
 
 At launch, a pin loads when the rig includes its plugin. A pin the rig doesn't
-include is offered on the launch confirmation, unselected, and left out with
-nobody at a terminal. Starting inside a pinned checkout offers that pin
+include is offered in the picker, not loading, and left out with nobody at a
+terminal. Starting inside a pinned checkout offers that pin
 selected, so you can leave it out: a plugin loaded into its own checkout
 reviews edits to itself.
 
@@ -235,16 +235,23 @@ fixed.
 ## Switching rigs mid-session
 
 ```text
-/rig:switch web infra
+/rig
 ```
 
+`/rig` opens the picker inside the session: the same graph as
+`--select`, set to what the session loads now, with the same keys for rigs,
+plugins, and pins. A toast names the pin that holds the folder you're in, if
+one does, and whether its checkout loads. `l` switches and `escape` or `q`
+closes it without one. `/rig web infra` skips the picker and switches
+to the rigs you name.
+
 A session can't change its plugins while it runs, so the switch happens across
-a restart that keeps the conversation: `/rig:switch` records the rigs you name,
-you type `/exit`, and rig relaunches the same conversation with the base rig
-and those rigs. The launch confirmation opens first when the new rigs leave
-pins to choose. The sandbox stays as the session had it; other Claude Code
-arguments from the first launch don't carry over. `/rig:switch` with no rig
-lists the rigs, marking the ones the session uses.
+a restart that keeps the conversation: rig records the switch, Claude Code
+exits on its own, and rig relaunches the same conversation with what you
+chose. A switch from the picker doesn't ask again. One that names rigs opens
+the picker first when they leave pins to choose. The sandbox stays as the
+session had it, and other Claude Code arguments from the first launch don't
+carry over.
 
 rig stays running while Claude Code does, which is how it sees the exit. A
 session started without rig, or with nobody at a terminal, can't be relaunched
@@ -266,11 +273,11 @@ to keep them that way.
 ## What a launch shows
 
 When a launch has something to decide (a plugin to install, or a pin the rigs
-don't settle), rig opens one launch confirmation first. The top lists the rigs:
-add or take one away with space, and the plugins below follow, each naming the
-rig it comes from and marking the ones that load from a pin or install at
-launch. Under them are the pins left to choose; toggle them with space. `enter`
-launches, `q` cancels. A launch with nothing to decide skips it.
+don't settle), rig opens the `--select` picker first, with a toast saying why:
+the pin that holds this folder and whether its checkout loads, a pin the rigs
+leave out, the plugins that install at launch. The cursor starts on that pin's
+row, and `enter` there opens its choices. `l` launches, `q` cancels. A launch
+with nothing to decide skips the picker.
 
 Before Claude Code starts, rig prints the rigs, the pins, and the sandbox
 state:

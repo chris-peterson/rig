@@ -8,6 +8,16 @@
   `exists` for files in the repo (`**/*.tf`, `SPEC.md`). The launch line says
   which rule added each rig, and `rig list` shows the defaults for the current
   folder. Rules add to the `default` list, which still applies everywhere.
+- `/rig` replaces `/rig:switch` and opens the `--select` picker inside the
+  session, set to what the session loads now: toggle rigs, single plugins, and
+  pins, then `l` switches. Claude Code exits on its own and rig relaunches the
+  conversation with what you picked, so there's no `/exit` to type. A toast
+  names the pin that holds the current folder. `/rig <rig>...` switches
+  straight to the rigs you name. This needs a Claude Code with function hooks
+  (mods).
+- The launch confirmation is gone. A launch with a pin to choose or a plugin
+  to install opens the `--select` picker instead, with a toast saying why and
+  the cursor on that pin. `l` launches, where `enter` used to.
 
 ## 0.2.0
 

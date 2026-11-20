@@ -47,10 +47,11 @@ docs:
     {{shipyard}} build-docs
     docsify serve docs --open
 
-# run the test suite, including the completion parity check
+# run the test suite, including the completion parity check, then the /rig mod's tests
 [group('check your work')]
 test:
     uv run --quiet --with pyyaml --with textual python -m unittest discover -s tests
+    command claude plugin test .
 
 # run claude plugin validate with plugin.yml's acceptances, as the projection job does
 [group('check your work')]

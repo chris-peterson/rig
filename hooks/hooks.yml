@@ -6,3 +6,6 @@ hooks:
   - event: SessionStart
     command: 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/beacon-badge.sh"'
     description: Shows the session's rigs on beacon's pane badge, when beacon is installed.
+modules:
+  - path: ./switch.ts
+    description: /rig opens the --select picker inside the session, then relaunches the conversation with what you pick.
