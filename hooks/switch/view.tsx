@@ -213,7 +213,7 @@ function pinView(kit: Kit, model: PaneModel, pluginId: string): RenderElement {
         ) : null}
         {Model.isLocked(offer) ? null : (
           <Button key={KEYS.LOAD} onPress={() => kit.actions.togglePin(pluginId)}>
-            {isCheckout ? 'Skip checkout' : 'Load checkout'}
+            {isCheckout ? 'Skip checkout' : offer.here ? 'Load anyway' : 'Load checkout'}
           </Button>
         )}
         <Button key={KEYS.CLOSE} onPress={kit.actions.closeDialog}>

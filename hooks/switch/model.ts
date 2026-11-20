@@ -74,8 +74,8 @@ export const nameOf = (pluginId: string): string => pluginId.split('@')[0] ?? pl
 /** PIN-08: a pin the rigs include loads, unless the launch starts inside it. */
 export const isLocked = (offer: Offer): boolean => offer.inRig && !offer.here
 
-/** PIN-07..09: selected when the rigs include it or the launch starts inside it. */
-export const isSelected = (offer: Offer): boolean => offer.inRig || offer.here
+/** PIN-07..09: selected when the rigs include it, unless the session's folder is in or above its checkout. */
+export const isSelected = (offer: Offer): boolean => offer.inRig && !offer.here
 
 /** Whether the pin's checkout loads under these choices. */
 export function loads(offer: Offer, choices: Readonly<Record<string, boolean>>): boolean {
@@ -295,6 +295,10 @@ export function pinStateOf(plan: Plan, pluginId: string, choices: Readonly<Recor
 
   if (loads(offer, choices)) {
     return 'the checkout loads'
+  }
+
+  if (offer.here && plan.sources.has(pluginId)) {
+    return "you're in or above its checkout, so the installed copy loads"
   }
 
   return plan.sources.has(pluginId) ? 'the installed copy loads' : 'not loaded'

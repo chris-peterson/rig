@@ -674,8 +674,8 @@ class Shell(RigCase):
         self.assertEqual(result.stderr, "")
 
     def test_shell_03_plugin_pin_is_rigs(self):
-        result = self.rig("plugin", "pin")
-        self.assertEqual(result.stdout, "No plugins pinned.\n")
+        result = self.rig("plugin", "pin", "./nope/b")
+        self.assertIn("does not exist", result.stderr)
         self.rig("plugins", "unpin", "nope")
         self.rig("plugin", "list")
         self.assertEqual(self.claude_calls(), [["plugin", "list"]])
@@ -734,7 +734,7 @@ class Shell(RigCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("install-cli takes no arguments", result.stderr)
 
-    def test_shell_05_bare_rig_prints_usage(self):
+    def test_shell_05_bare_rig_without_a_terminal_prints_usage(self):
         result = self.rig()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(result.stdout.startswith("usage: rig"))
@@ -944,6 +944,15 @@ class Pins(RigCase):
         self.write_rigs(BASIC_RIGS)
         self.write_installed("a@m", "b@m", "c@n", "x@n")
         self.ckout = self.checkout("b")
+        self.away = self.home / "work"
+        self.away.mkdir()
+
+    def rig(self, *args: str, cwd: Path | None = None, env: dict | None = None) -> subprocess.CompletedProcess:
+        """Run from a folder beside the checkouts, since one above them skips their pins (PIN-07)."""
+        return super().rig(*args, cwd=cwd or self.away, env=env)
+
+    def rig_tty(self, *args: str, cwd: Path | None = None, **more) -> tuple[int, str]:
+        return super().rig_tty(*args, cwd=cwd or self.away, **more)
 
     def checkout(self, name: str, folder: str | None = None) -> Path:
         path = self.home / "src" / (folder or name)
@@ -1015,18 +1024,54 @@ class Pins(RigCase):
         self.rig("-p", "hi")
         self.assertNotIn("--plugin-dir", self.launched()[1])
 
-    def test_pin_06_bare_pin_lists_with_age(self):
+    def test_pin_06_pins_lists_with_age_indented(self):
+        self.assertEqual(self.rig("pins").stdout, "No plugins pinned.\n")
         self.rig("pin", str(self.ckout))
-        self.assertRegex(self.rig("pin").stdout, r"^📌 b  ~/src/b  \(just now\)\n$")
+        self.assertRegex(self.rig("pins").stdout, r"^ 📌 b  ~/src/b  \(just now\)\n$")
+        self.assertIn("pins takes no arguments", self.rig("pins", "b").stderr)
 
-    def test_pin_07_pin_holding_cwd_can_be_left_out(self):
+    def test_pin_14_bare_pin_and_unpin_take_the_checkout_this_folder_is_in(self):
+        inside = self.ckout / "skills" / "deep"
+        inside.mkdir(parents=True)
+        result = self.rig("pin", cwd=inside)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([pin["path"] for pin in self.pins()], [str(self.ckout.resolve())])
+        result = self.rig("unpin", cwd=self.home)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no pin holds", result.stderr)
+        result = self.rig("unpin", cwd=inside)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.pins(), [])
+
+    def test_pin_14_bare_pin_outside_a_checkout_refused(self):
+        result = self.rig("pin", cwd=self.home)
+        self.assertIn("holds no plugin manifest", result.stderr)
+
+    def test_pin_07_pin_holding_cwd_skipped_for_this_launch(self):
         self.rig("pin", str(self.ckout))
-        status, output = self.rig_tty("claude", keys=["enter", "tab", "tab", "enter", "l"], cwd=self.ckout)
+        status, output = self.rig_tty("claude", keys=["l"], cwd=self.ckout)
         self.assertEqual(status, 0, output)
-        self.assertIn("b holds this folder, so its checkout loads", output)
+        self.assertIn("you're in or above its checkout, so the", output)
+        self.assertIn("📌 b  ~/src/b  (just now, not loaded, ⌂ checkout here)", output)
         overlay, args = self.launched()
         self.assertNotIn("--plugin-dir", args)
         self.assertIs(overlay["enabledPlugins"]["b@m"], True)
+        self.assertIsNone(self.auto_mode_server())
+        self.assertEqual(len(self.pins()), 1)
+
+    def test_pin_07_pin_below_cwd_skipped_headless(self):
+        self.rig("pin", str(self.ckout))
+        self.rig("-p", "hi", cwd=self.home / "src")
+        overlay, args = self.launched()
+        self.assertNotIn("--plugin-dir", args)
+        self.assertIs(overlay["enabledPlugins"]["b@m"], True)
+
+    def test_pin_07_pin_holding_cwd_loads_anyway(self):
+        self.rig("pin", str(self.ckout))
+        status, output = self.rig_tty("claude", keys=["enter", "tab", "tab", "enter", "l"], cwd=self.ckout)
+        self.assertEqual(status, 0, output)
+        self.assertEqual(self.launched()[1][:2], ["--plugin-dir", str(self.ckout.resolve())])
+        self.assertEqual(self.auto_mode_server(), "0")
 
     def test_pin_08_rig_plugin_loads_from_checkout(self):
         self.rig("pin", str(self.ckout))
@@ -1036,15 +1081,15 @@ class Pins(RigCase):
         self.assertIs(overlay["enabledPlugins"]["b@m"], False)
         self.assertIn("\n📌 b  ~/src/b  (just now)\n", result.stderr)
 
-    def test_pin_11_pin_holding_cwd_turns_auto_mode_server_off(self):
+    def test_pin_11_pin_holding_cwd_loaded_anyway_turns_auto_mode_server_off(self):
         self.rig("pin", str(self.ckout))
-        result = self.rig("-p", "hi", cwd=self.ckout)
+        status, output = self.rig_tty("claude", keys=["enter", "tab", "tab", "enter", "l"], cwd=self.ckout)
         self.assertEqual(self.auto_mode_server(), "0")
-        self.assertIn("auto mode: CLAUDE_CODE_AUTO_MODE_SERVER=0, since b is pinned here", result.stderr)
+        self.assertIn("auto mode: CLAUDE_CODE_AUTO_MODE_SERVER=0, since b is pinned here", output)
 
-    def test_pin_11_folder_holding_pin_turns_auto_mode_server_off(self):
+    def test_pin_11_folder_holding_pin_loaded_anyway_turns_auto_mode_server_off(self):
         self.rig("pin", str(self.ckout))
-        self.rig("-p", "hi", cwd=self.home / "src")
+        self.rig_tty("claude", keys=["enter", "tab", "tab", "enter", "l"], cwd=self.home / "src")
         self.assertEqual(self.auto_mode_server(), "0")
 
     def test_pin_11_unrelated_folder_leaves_auto_mode_server(self):
@@ -1283,16 +1328,18 @@ class Setup(RigCase):
 
     def test_shell_05_bare_rig_opens_setup_without_rigs(self):
         self.settings(FLAT_SETTINGS)
-        status, output = self.rig_tty(keys=["s", "q"])
-        self.assertEqual(status, 0, output)
+        status, output = self.rig_tty(keys=["s", "q", "q"])
+        self.assertIn("launch cancelled", output)
         self.assertEqual(self.config()["rigs"]["base"]["plugins"], ["a@m", "b@m", "c@n", "d@n", "e@o"])
         self.assertEqual(self.claude_calls(), [])
 
-    def test_shell_05_bare_rig_prints_usage_once_rigs_exist(self):
+    def test_shell_05_bare_rig_opens_the_picker_once_rigs_exist(self):
         self.write_rigs("rigs:\n  base: {plugins: [a@m]}\n")
-        status, output = self.rig_tty()
-        self.assertEqual(status, 0, output)
-        self.assertIn("usage: rig", output)
+        status, output = self.rig_tty(keys=["q"])
+        self.assertNotEqual(status, 0, output)
+        self.assertIn("launch cancelled", output)
+        self.assertNotIn("usage: rig", output)
+        self.assertEqual(self.claude_calls(), [])
 
     def test_setup_needs_a_terminal(self):
         result = self.rig("setup")
@@ -1896,7 +1943,7 @@ class Picker(unittest.IsolatedAsyncioTestCase):
         async with running as pilot:
             await pilot.pause()
             self.assertEqual(self.notice.splitlines(), [
-                "📌 here holds this folder, so its checkout loads.",
+                "⌂ here: you're in or above its checkout, so the installed copy loads; its 📌 can load it anyway.",
                 "📌 outside isn't in these rigs, so its checkout loads only if you choose it.",
                 "installs at launch: z@m",
                 "Enter on a row changes it; l launches, q cancels."])
@@ -1908,7 +1955,7 @@ class Picker(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(type(app.screen).__name__, "PinDialog")
             await pilot.press("escape", "l")
         self.assertEqual(app.return_value[0], ["web"])
-        self.assertEqual(self.choices(app), {"inrig": True, "here": True, "outside": False})
+        self.assertEqual(self.choices(app), {"inrig": True, "here": False, "outside": False})
 
     async def test_launch_05_q_cancels(self):
         app, running = self.running(confirm=True)
@@ -1928,18 +1975,18 @@ class Picker(unittest.IsolatedAsyncioTestCase):
         async with running as pilot:
             await pilot.pause()
             lines = self.lines(app)
-            self.assertEqual(lines, ["plugin        base  ★web  full",
-                                     "               ✓     ✓            ★ = default  ✓ = loads",
-                                     "a@m            ●     ·     ●",
+            self.assertEqual(lines, ["plugin        base  ★web  full    ★ = default",
+                                     "               ✓     ✓            ✓ = loads",
+                                     "a@m            ●     ·     ●      ⌂ = pin off here",
                                      "inrig@m 📌     ●     ·     ●",
-                                     "here@m 📌      ·     ●     ●",
+                                     "here@m 📌      ·     ●     ●    ⌂",
                                      "z@m            ·     ●     ·    installs at launch",
                                      "outside@m 📌   ·     ·     ●"])
-            self.assertEqual(lines[0], self.layout.text().splitlines()[0])
+            self.assertTrue(lines[0].startswith(self.layout.text().splitlines()[0] + " "))
             self.assertEqual(self.summary(app), "base + web: 4 plugins")
             await pilot.press("l")
         self.assertEqual(app.return_value[0], ["web"])
-        self.assertEqual(self.choices(app), {"inrig": True, "here": True, "outside": False})
+        self.assertEqual(self.choices(app), {"inrig": True, "here": False, "outside": False})
 
     async def test_launch_07_header_names_the_command_and_rows_never_wrap(self):
         app, running = self.running()
@@ -2045,7 +2092,8 @@ class Picker(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             await pilot.press("down", "down", "down", "enter")
             await pilot.pause()
-            self.assertEqual(str(app.screen.query_one("#pin-load").label), "Skip checkout")
+            self.assertEqual(str(app.screen.query_one("#pin-load").label), "Load anyway")
+            self.assertIn("you're in or above its checkout", str(app.screen.query_one("#pin-details").render()))
             await pilot.click("#pin-load")
             await pilot.press("down", "down", "enter")
             await pilot.pause()
@@ -2054,7 +2102,7 @@ class Picker(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertEqual(len(app.screen.query("#pin-load")), 0)
             await pilot.press("escape", "l")
-        self.assertEqual(self.choices(app), {"inrig": True, "here": False, "outside": True})
+        self.assertEqual(self.choices(app), {"inrig": True, "here": True, "outside": True})
 
     async def test_launch_07_e_leaves_for_the_editor_with_the_rigs_chosen(self):
         app, running = self.running()
@@ -2073,7 +2121,9 @@ class Picker(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(rocket.region.right, footer.region.right + rocket.region.width)
             self.assertEqual(rocket.region.y, footer.region.y)
             first = rocket.tick
-            await pilot.pause(0.4)
+            lights = str(rocket.render())
+            await pilot.pause(self.rig.COUNTDOWN_STEP * 1.5)
+            self.assertEqual(str(rocket.render()).count("●"), lights.count("●") + 1)
             self.assertGreater(rocket.tick, first)
             # pilot.click measures the screen less its border, so it can't reach the bar on the border's inner edge
             rocket.on_click()
@@ -2084,11 +2134,11 @@ class Picker(unittest.IsolatedAsyncioTestCase):
         app, running = self.running()
         async with running as pilot:
             await pilot.pause()
-            self.assertNotIn("◐ = part", self.lines(app)[1])
+            self.assertNotIn("◐ = part", self.lines(app)[2])
             await pilot.press("down", "enter")
-            self.assertIn("★ = default  ✓ = loads  ◐ = part", self.lines(app)[1])
+            self.assertEqual([line[-11:] for line in self.lines(app)[:3]], ["★ = default", "  ✓ = loads", "   ◐ = part"])
             await pilot.press("enter")
-            self.assertNotIn("◐ = part", self.lines(app)[1])
+            self.assertNotIn("◐ = part", self.lines(app)[2])
 
     async def test_pin_13_a_click_on_a_pin_opens_it_and_escape_or_the_x_closes_it(self):
         app, running = self.running()
@@ -2111,7 +2161,7 @@ class Picker(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(type(app.screen).__name__, "PinDialog")
             self.assertEqual(self.summary(app), "base + web: 4 plugins")
             await pilot.press("l")
-        self.assertEqual(self.choices(app), {"inrig": True, "here": True, "outside": False})
+        self.assertEqual(self.choices(app), {"inrig": True, "here": False, "outside": False})
         self.assertEqual(len(self.rig.read_pins()), 3)
 
     async def test_pin_13_a_click_anywhere_on_a_pinned_row_opens_it_to_toggle_the_plugin(self):
@@ -2144,7 +2194,7 @@ class Picker(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.lines(app)[3].rstrip(), "inrig@m        ●     ·     ●")
             self.assertEqual([p["plugin"] for p in self.rig.read_pins()], ["here", "outside"])
             await pilot.press("l")
-        self.assertEqual(self.choices(app), {"here": True, "outside": False})
+        self.assertEqual(self.choices(app), {"here": False, "outside": False})
 
     async def test_launch_07_space_and_enter_toggle_what_the_cursor_is_on_and_l_launches(self):
         app, running = self.running()
@@ -2181,11 +2231,11 @@ class Picker(unittest.IsolatedAsyncioTestCase):
         app, running = self.running()
         async with running as pilot:
             await pilot.pause()
-            self.assertTrue(self.lines(app)[1].endswith("★ = default  ✓ = loads"))
+            self.assertEqual([line[-11:] for line in self.lines(app)[:2]], ["★ = default", "  ✓ = loads"])
             await pilot.press("space")
-            self.assertTrue(self.lines(app)[1].endswith("★ = default"))
+            self.assertEqual(self.lines(app)[1].strip(), "✓")
             await pilot.press("down", "enter")
-            self.assertTrue(self.lines(app)[1].endswith("★ = default  ◐ = part"))
+            self.assertEqual([line[-11:] for line in self.lines(app)[:2]], ["★ = default", "   ◐ = part"])
 
     async def test_launch_07_q_cancels(self):
         app, running = self.running()

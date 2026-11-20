@@ -15,8 +15,8 @@ must be on your PATH too. When a plugin update leaves the `rig` on your PATH
 behind, a session start tells you to run `/rig:install-rig` again.
 
 `claude` with no arguments launches your default rigs. `rig` with no arguments
-opens first-run setup when you have no rigs yet, and prints its usage after
-that.
+opens the `--select` picker on them, so you can change what loads before the
+launch; with no rigs yet, first-run setup comes first.
 
 **Adopting rig turns off the plugins your Claude Code settings enable.** Every
 launch sets each plugin `~/.claude/settings.json` enables to off, so a session
@@ -70,8 +70,8 @@ launches, and refuses with nobody at a terminal to answer.
 `full` added, the rigs across the top and their plugins down the side, a 📌 on
 each pinned plugin. One cursor sits on a rig's name or a plugin's row; the
 arrow keys and tab move it, and space, enter, or a click toggles what it's on.
-A ✓ under a rig's name means the launch loads it (the legend at the end of
-that row says so), and the plugins the launch
+A ✓ under a rig's name means the launch loads it (the legend down the right
+of the graph says so), and the plugins the launch
 loads stay bright and the rest dim. With `full` chosen the summary reads
 `all 40 plugins`. `base` always loads, so it can't be toggled, and `full` holds
 every other rig's plugins, so choosing it takes the others away and choosing
@@ -203,8 +203,9 @@ your edits take effect in real sessions before a marketplace release.
 ```bash
 rig pin ~/src/acme-widget      # pin a checkout by path
 rig pin acme-widget            # or by name, found among your local clones
-rig pin                        # list the pins and how long each has been pinned
-rig unpin acme-widget
+rig pin                        # or the checkout you're in
+rig pins                       # list the pins and how long each has been pinned
+rig unpin acme-widget          # bare `rig unpin` unpins the checkout you're in
 ```
 
 `claude plugin pin` and `claude plugin unpin` work the same way.
@@ -219,9 +220,10 @@ clones:
 
 At launch, a pin loads when the rig includes its plugin. A pin the rig doesn't
 include is offered in the picker, not loading, and left out with nobody at a
-terminal. Starting inside a pinned checkout offers that pin
-selected, so you can leave it out: a plugin loaded into its own checkout
-reviews edits to itself.
+terminal. Starting inside a pinned checkout, or in a folder above it, loads the
+installed copy for that launch only, so a plugin you're editing doesn't review
+edits to itself: the picker marks the pin ⌂, and its pin's Load anyway loads the
+checkout after all.
 
 When a loaded pin's checkout holds the folder you start in, or sits inside it,
 rig sets `CLAUDE_CODE_AUTO_MODE_SERVER=0` for that session, since auto mode

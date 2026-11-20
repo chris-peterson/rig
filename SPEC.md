@@ -265,12 +265,14 @@ When the user runs `rig unpin <path|name>`, the system shall stop loading that
 checkout.
 
 #### `PIN-06`
-When the user runs `rig pin` with no arguments, the system shall list the pins
-with when each was pinned.
+When the user runs `rig pins`, the system shall list the pins, indented one
+space, with when each was pinned.
 
 #### `PIN-07`
-When an interactive launch starts inside a pinned checkout, the system shall
-offer that pin in the picker, loading.
+When a launch starts inside a pinned checkout or in a folder above one, the
+system shall load the installed copy in place of that checkout for that launch
+only, marking the pin with ⌂ in the picker and its legend and offering to load
+the checkout anyway.
 
 #### `PIN-08`
 When a launch's rigs include a pinned plugin, the system shall load the pinned
@@ -285,8 +287,8 @@ If a launch's rigs do not include a pinned plugin and no one is at a terminal
 to ask, then the system shall launch without that pin.
 
 #### `PIN-11`
-Where a launch loads a pin whose checkout holds the working directory or sits
-inside it, the system shall start Claude Code with
+Where a launch loads anyway a pin whose checkout holds the working directory or
+sits inside it, the system shall start Claude Code with
 `CLAUDE_CODE_AUTO_MODE_SERVER=0`, unless the environment already sets it, and
 say so before Claude Code starts.
 
@@ -296,7 +298,7 @@ say so before Claude Code starts.
 
 #### `PIN-12`
 The system shall mark each pinned plugin with 📌 wherever it lists plugins or
-pins: the launch summary, `rig pin`, `rig list`, the graph, the picker, the
+pins: the launch summary, `rig pins`, `rig list`, the graph, the picker, the
 switch pane, and the rig editor.
 
 #### `PIN-13`
@@ -305,6 +307,12 @@ show the pin's checkout, when it was pinned, and whether it loads, unpinning it
 on enter or Unpin, taking the plugin out of the launch or putting it in on a
 second button, loading the checkout or skipping it on a third, and closing on
 escape or a click on its ✕.
+
+#### `PIN-14`
+When the user runs `rig pin` or `rig unpin` with no arguments, the system shall
+act on the checkout the working directory is in: for `pin`, the nearest folder
+at or above it that holds a plugin manifest; for `unpin`, the pin whose
+checkout holds it.
 
 ### `SANDBOX`
 Sandbox
@@ -445,9 +453,10 @@ Where no other shell function defines `claude`, the install shall make `claude`
 run `rig claude`.
 
 #### `SHELL-05`
-When the user runs `rig` with no arguments, the system shall open first-run
-setup when no rigs are defined and someone is at a terminal, and print its usage
-otherwise, without launching Claude Code.
+When the user runs `rig` with no arguments and someone is at a terminal, the
+system shall launch as `rig --select` does, opening first-run setup first when
+no rigs are defined; with no one at a terminal, it shall print its usage without
+launching Claude Code.
 
 #### `SHELL-06`
 When the user runs `rig claude`, the system shall treat the arguments that

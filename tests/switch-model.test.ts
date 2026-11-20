@@ -64,7 +64,7 @@ describe('switch-model', () => {
     const skipped = Model.togglePin(STATE, start, 'rig@cp') ?? start
     const plan = Model.planOf(STATE, skipped)
 
-    expect(Model.pinStateOf(plan, 'rig@cp', skipped.choices)).toBe('the installed copy loads')
+    expect(Model.pinStateOf(plan, 'rig@cp', skipped.choices)).toBe("you're in or above its checkout, so the installed copy loads")
     expect(Model.recorded(STATE, skipped).pins).toEqual({ '/src/rig': false })
     expect(Model.hereNotes(STATE, skipped)).toEqual(['📌 rig holds this folder: the installed copy loads'])
   })

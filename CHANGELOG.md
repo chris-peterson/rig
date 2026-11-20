@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- `rig` with no arguments opens the `--select` picker at a terminal instead of
+  printing its usage. `claude` with no arguments still launches the default
+  rigs straight away.
+- `rig pin` with no arguments pins the checkout you're in, and `rig unpin` with
+  none unpins it. Listing the pins moved to `rig pins`, which indents them.
+- A launch inside a pinned checkout, or in a folder above one, loads the
+  installed copy for that launch and leaves the pin in place. The picker marks
+  the pin ⌂ and explains the mark in its legend; Load anyway in the pin's dialog
+  loads the checkout, with `CLAUDE_CODE_AUTO_MODE_SERVER=0` set as before.
+- The picker's 🚀 counts down to launch: five lights come on toward it, one
+  every half second, twice as fast under the pointer.
+- The picker's legend runs down the right of the graph, one mark to a line, so
+  it no longer pushes the graph past the window's width.
+
 - A rig can carry `rules` that make it a default wherever they match, so a
   plain `claude` loads what the folder needs: `path` for where you launch
   (`~/src/acme/`, or `*infra*/` for any folder with infra in its name) and

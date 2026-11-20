@@ -3,10 +3,10 @@
 Tracking status of the requirements declared in [`SPEC.md`](SPEC.md).
 Maintained by `/sextant:spec-status`.
 
-**Last audit:** 2026-11-19
+**Last audit:** 2026-11-20
 **Spec version:** root SPEC.md (unversioned)
 **Plugin version:** unreleased
-**Coverage:** 93 Covered, 0 Partial, 0 Missing/Contradicts
+**Coverage:** 94 Covered, 0 Partial, 0 Missing/Contradicts
 **Evidence pointers:** file
 
 ## Status by category
@@ -16,7 +16,7 @@ Maintained by `/sextant:spec-status`.
 | RIG-01..20 | 20 | All Covered | `scripts/rig` (`load_config`, `check_rules`, `default_rigs`, `path_matches`, `repo_files`, `rule_match`, `take_rigs`, `plan`, `overlay`, `stock_args`, `turn_off_user_plugins`, `cmd_list`, `graph_of`, `Graph`), tests in `tests/test_rig.py`. Rigs are flat: `base` loads in every launch, the named rigs add to it, and `full` is every plugin installed for the working directory. RIG-04 is a per-launch `--settings` overlay that names only the launch's plugins and pinned plugins' installed copies, since a `--settings` value outranks every settings file. RIG-12 edits `~/.claude/settings.json` as text to keep its blank-line groups. RIG-18..20 match rules against the resolved working directory and `$PWD`, and list a repo's files once per launch with `git ls-files --cached --others --exclude-standard`; the globs support `*`, `?`, and `**`, not bracket classes or GitLab's extglob braces. `/plugin enable` loading mid-session under the new overlay hasn't been tried |
 | SETUP-01..06 | 8 | All Covered | `scripts/rig` (`RigEdits`, `setup`, `launch`), tests in `tests/test_rig.py`; SETUP-01 and SETUP-05 drive the editor through a pty. Includes SETUP-04a..b. SETUP-04a reads the settings file as text, since the blank lines don't survive a JSON parse. `claude plugin disable` rewrites the file without them (verified 2026-11-10, Claude Code project scope), so the groups last only in a file edited by hand |
 | EDITOR-01..14 | 14 | All Covered | `scripts/rig` (`RigEdits`, `editor_app`, `use_theme`), tests in `tests/test_rig.py` drive it headless with Textual's pilot, keys and clicks. The rig list draws its bracket with box characters down the right of each row; both screens use revdiff's Dracula colors, copied into `DRACULA` |
-| PIN-01..13 | 13 | All Covered | `scripts/rig`, `hooks/switch/model.ts`, tests in `tests/test_rig.py` and `tests/switch*.test.ts`. PIN-07 and PIN-09 offer pins in the picker, driven through a pty. PIN-12's 📌 comes from `plugin_cell` and `pin_lines`, one each for a plugin's name and a pin's line, and the graph pads it as two cells (`cells`). PIN-08 uses `--plugin-dir`: the checkout loads as `<name>@inline` and the installed copy doesn't load, including when the overlay disables it (verified 2026-11-10). PIN-11 (`auto_mode_server_off`) works around anthropics/claude-code#95982 |
+| PIN-01..14 | 14 | All Covered | `scripts/rig`, `hooks/switch/model.ts`, tests in `tests/test_rig.py` and `tests/switch*.test.ts`. PIN-07 and PIN-09 offer pins in the picker, driven through a pty. PIN-12's 📌 comes from `plugin_cell` and `pin_lines`, one each for a plugin's name and a pin's line, and the graph pads it as two cells (`cells`). PIN-08 uses `--plugin-dir`: the checkout loads as `<name>@inline` and the installed copy doesn't load, including when the overlay disables it (verified 2026-11-10). PIN-11 (`auto_mode_server_off`) works around anthropics/claude-code#95982 |
 | SANDBOX-01 | 1 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. The overlay carries ai-sdlc's strict sandbox block plus `autoAllowBashIfSandboxed`, which Claude Code 2.1.325 turned off by default; a launch on a machine without the sandbox hasn't been tried |
 | LAUNCH-01..15 | 15 | All Covered | `scripts/rig` (`launch`, `claude_args`, `confirmation`, `select_app`, `run_claude`, `run_app`), tests in `tests/test_rig.py`; LAUNCH-05 and LAUNCH-07..13 drive the picker with Textual's pilot, keys and clicks, and through a pty. LAUNCH-05 opens the picker with a Textual notification as its notice, the cursor on the first pin to choose. The picker draws the same `Graph` pieces `rig list --graph` prints. LAUNCH-14 is `cmd_badge`, run by `hooks/beacon-badge.sh` at SessionStart; tests use a stand-in beacon, and a live badge hasn't been tried. LAUNCH-13's click is driven through the handler, since Textual's pilot can't click the bar on a bordered screen's inner edge. LAUNCH-06's Ctrl-C handling is untested. A launch whose arguments carry `--settings` is refused, since a second `--settings` replaces the first (verified 2026-11-10). LAUNCH-15's tests close the picker's pty with SIGHUP ignored and with no controlling terminal; the editor shares `run_app` but isn't driven through a hangup |
 | SWITCH-01..05 | 5 | All Covered | The `/rig` mod (`hooks/switch.ts`, `hooks/switch/model.ts`, `hooks/switch/view.tsx`) over `scripts/rig` (`cmd_switch`, `switch_state`, `launch`, `claude_args`, `take_switch`); tests in `tests/test_rig.py` have a stand-in claude run `rig switch`, with rigs and with `--picks`, and check the relaunch, and `tests/switch.test.ts` drives the mod under `claude plugin test`. The command is `/rig`, not `/rig:switch`: a mod can't register a name with `:` (Claude Code 2.1.329). The mod's exit through `$.command.run` was tried live; the pane hasn't been driven interactively, and its focus-follow scroll is untested |
@@ -25,6 +25,17 @@ Maintained by `/sextant:spec-status`.
 | DOCTOR-01..05 | 5 | All Covered | `scripts/rig` (`cmd_doctor`, `shell_probe`), tests in `tests/test_rig.py` probe a new zsh in a throwaway HOME. On a live machine (2026-11-10) it caught a `~/.zcompdump` from before `_rig`, read by `compinit -C` |
 
 ## Audit history
+
+### 2026-11-20: Bare rig picks, pins lists
+
+STATUS.md updated: +1 ID (PIN-14 bare `pin`/`unpin` act on the checkout the
+working directory is in, Covered); PIN-06 moves the listing to `rig pins`,
+SHELL-05 makes bare `rig` open the `--select` picker at a terminal, and PIN-12
+follows. PIN-07 now skips a pin for a launch started in or above its checkout,
+marked ⌂, with Load anyway in its pin dialog; PIN-11 applies to a pin loaded
+anyway. `tests/switch*.test.ts` were updated but not run: `claude plugin test`
+stops on `hooks/hooks.json`, which shipyard generates without the mod's
+`modules`. Coverage 94 of 94.
 
 ### 2026-11-19 — Coverage refresh (spec-status)
 
