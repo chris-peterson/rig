@@ -21,4 +21,10 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - uses: extractions/setup-just@v3
 
+      # `just test` ends with `claude plugin test`, which runs the /rig mod's
+      # tests and needs no login, only Claude Code on PATH.
+      - run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - run: just test
