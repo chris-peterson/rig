@@ -7,14 +7,24 @@
   rigs straight away.
 - `rig pin` with no arguments pins the checkout you're in, and `rig unpin` with
   none unpins it. Listing the pins moved to `rig pins`, which indents them.
-- A launch inside a pinned checkout, or in a folder above one, loads the
-  installed copy for that launch and leaves the pin in place. The picker marks
-  the pin ⌂ and explains the mark in its legend; Load anyway in the pin's dialog
-  loads the checkout, with `CLAUDE_CODE_AUTO_MODE_SERVER=0` set as before.
-- The picker's 🚀 counts down to launch: five lights come on toward it, one
-  every half second, twice as fast under the pointer.
-- The picker's legend runs down the right of the graph, one mark to a line, so
-  it no longer pushes the graph past the window's width.
+- A pin that loads while you launch inside its checkout, or in a folder above
+  it, shows ❗ in place of 📌 in the picker, since the session runs on the
+  files it edits. Its dialog warns about that and offers Skip for this launch,
+  which loads the installed copy this once and leaves the pin in place.
+- The picker's 🚀 counts down to launch: five `>` chevrons light toward it,
+  one every half second, twice as fast under the pointer.
+- A click anywhere in a rig's column toggles the rig, not only a click on its
+  name; a click on a plugin's name still toggles the plugin.
+- 📌 sits in front of a pinned plugin's name, in a margin of its own in the
+  graph, as it does in `rig pins`.
+- rig refuses a command it doesn't know: `rig --graph` or `rig lsit` stops
+  with what to type instead, rather than opening the picker and handing
+  Claude Code an option it refuses. A one-word prompt goes after `--`:
+  `rig -- hi`. `claude hi` still starts a session with that prompt.
+- The picker drops the line of instructions under the graph; the footer's key
+  bindings say the same.
+- The picker's legend sits in the graph's top border, so it no longer pushes
+  the graph past the window's width, and the vertical scrollbar is thinner.
 
 - A rig can carry `rules` that make it a default wherever they match, so a
   plain `claude` loads what the folder needs: `path` for where you launch

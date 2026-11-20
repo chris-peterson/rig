@@ -67,11 +67,13 @@ the hooks and guardrails you're used to, rig says so and asks before it
 launches, and refuses with nobody at a terminal to answer.
 
 `--select` opens a picker before the launch: the `rig list --graph` table with
-`full` added, the rigs across the top and their plugins down the side, a 📌 on
-each pinned plugin. One cursor sits on a rig's name or a plugin's row; the
-arrow keys and tab move it, and space, enter, or a click toggles what it's on.
-A ✓ under a rig's name means the launch loads it (the legend down the right
-of the graph says so), and the plugins the launch
+`full` added, the rigs across the top and their plugins down the side, a 📌 in
+front of each pinned plugin. One cursor sits on a rig's name or a plugin's row;
+the arrow keys and tab move it, and space or enter toggles what it's on. A click
+anywhere in a rig's column toggles the rig, and a click on a plugin's name
+toggles the plugin.
+A ✓ under a rig's name means the launch loads it (the legend in the graph's
+top border says so), and the plugins the launch
 loads stay bright and the rest dim. With `full` chosen the summary reads
 `all 40 plugins`. `base` always loads, so it can't be toggled, and `full` holds
 every other rig's plugins, so choosing it takes the others away and choosing
@@ -220,10 +222,11 @@ clones:
 
 At launch, a pin loads when the rig includes its plugin. A pin the rig doesn't
 include is offered in the picker, not loading, and left out with nobody at a
-terminal. Starting inside a pinned checkout, or in a folder above it, loads the
-installed copy for that launch only, so a plugin you're editing doesn't review
-edits to itself: the picker marks the pin ⌂, and its pin's Load anyway loads the
-checkout after all.
+terminal. Starting inside a pinned checkout offers that pin selected. Starting
+inside one, or in a folder above it, marks a loading pin ❗ in place of 📌: the
+session runs on the files it edits, which can give unpredictable results. Its
+pin's dialog says so and can skip the checkout for that launch only, leaving
+the pin in place.
 
 When a loaded pin's checkout holds the folder you start in, or sits inside it,
 rig sets `CLAUDE_CODE_AUTO_MODE_SERVER=0` for that session, since auto mode

@@ -74,8 +74,8 @@ export const nameOf = (pluginId: string): string => pluginId.split('@')[0] ?? pl
 /** PIN-08: a pin the rigs include loads, unless the launch starts inside it. */
 export const isLocked = (offer: Offer): boolean => offer.inRig && !offer.here
 
-/** PIN-07..09: selected when the rigs include it, unless the session's folder is in or above its checkout. */
-export const isSelected = (offer: Offer): boolean => offer.inRig && !offer.here
+/** PIN-07..09: selected when the rigs include it or the launch starts inside it. */
+export const isSelected = (offer: Offer): boolean => offer.inRig || offer.here
 
 /** Whether the pin's checkout loads under these choices. */
 export function loads(offer: Offer, choices: Readonly<Record<string, boolean>>): boolean {
@@ -297,10 +297,6 @@ export function pinStateOf(plan: Plan, pluginId: string, choices: Readonly<Recor
     return 'the checkout loads'
   }
 
-  if (offer.here && plan.sources.has(pluginId)) {
-    return "you're in or above its checkout, so the installed copy loads"
-  }
-
   return plan.sources.has(pluginId) ? 'the installed copy loads' : 'not loaded'
 }
 
@@ -358,9 +354,9 @@ export function center(text: string, width: number): string {
   return ' '.repeat(left) + text + ' '.repeat(margin - left)
 }
 
-/** PIN-12: the one way rig writes a plugin's name, marked 📌 when a checkout is pinned for it. */
+/** PIN-12: the one way rig writes a plugin's name, marked 📌 in front when a checkout is pinned for it. */
 export function pluginCell(pluginId: string, pins: readonly Pin[]): string {
-  return pins.some(pin => pin.plugin === nameOf(pluginId)) ? `${pluginId} ${PIN}` : pluginId
+  return pins.some(pin => pin.plugin === nameOf(pluginId)) ? `${PIN} ${pluginId}` : pluginId
 }
 
 export type Graph = {
@@ -369,6 +365,8 @@ export type Graph = {
   labels: readonly string[]
   heads: readonly string[]
   width: number
+  /** Room for a 📌 in front of the names, when any row is pinned. */
+  margin: string
 }
 
 /** RIG-14, LAUNCH-07: each rig's plugins together, then the installed plugins no rig names, then pins for none of those. */
@@ -381,11 +379,13 @@ export function graphOf(state: State): Graph {
 
   rows.push(...state.pins.map(pin => pin.plugin).filter(name => !shown.has(name)))
 
-  const labels = rows.map(p => pluginCell(p, state.pins))
+  const pinned = (p: string): boolean => state.pins.some(pin => pin.plugin === nameOf(p))
+  const margin = rows.some(pinned) ? ' '.repeat(cells(`${PIN} `)) : ''
+  const labels = rows.map(p => (pinned(p) ? pluginCell(p, state.pins) : margin + p))
   const heads = state.rigs.map(rig => (rig.default ? '★' : '') + rig.name)
-  const width = Math.max('plugin'.length, ...labels.map(cells))
+  const width = Math.max(cells(margin + 'plugin'), ...labels.map(cells))
 
-  return { rigs: state.rigs, rows, labels, heads, width }
+  return { rigs: state.rigs, rows, labels, heads, width, margin }
 }
 
 /** Whether row `pluginId` of the graph loads under the plan: a bare pin row loads when its plugin does. */

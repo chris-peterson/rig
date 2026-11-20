@@ -64,18 +64,19 @@ describe('switch-model', () => {
     const skipped = Model.togglePin(STATE, start, 'rig@cp') ?? start
     const plan = Model.planOf(STATE, skipped)
 
-    expect(Model.pinStateOf(plan, 'rig@cp', skipped.choices)).toBe("you're in or above its checkout, so the installed copy loads")
+    expect(Model.pinStateOf(plan, 'rig@cp', skipped.choices)).toBe('the installed copy loads')
     expect(Model.recorded(STATE, skipped).pins).toEqual({ '/src/rig': false })
     expect(Model.hereNotes(STATE, skipped)).toEqual(['📌 rig holds this folder: the installed copy loads'])
   })
 
-  test('RIG-14, PIN-12: the graph lists rigs’ plugins, then the rest installed, a 📌 after pinned ones', () => {
+  test('RIG-14, PIN-12: the graph lists rigs’ plugins, then the rest installed, a 📌 in front of pinned ones', () => {
     const graph = Model.graphOf(STATE)
 
     expect(graph.rows).toEqual(['anchor@getty', 'splunk@getty', 'rig@cp', 'beacon@getty', 'tack@cp'])
-    expect(graph.labels[2]).toBe('rig@cp 📌')
+    expect(graph.labels[2]).toBe('📌 rig@cp')
+    expect(graph.labels[1]).toBe('   splunk@getty')
     expect(graph.heads).toEqual(['base', 'ops', '★web', 'full'])
-    expect(graph.width).toBe(Model.cells('splunk@getty'))
+    expect(graph.width).toBe(Model.cells('   splunk@getty'))
   })
 
   test('marks centre as Python’s str.center does', () => {

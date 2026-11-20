@@ -51,20 +51,49 @@ def version_display() -> str:
     return f"{version}-dev.g{sha}{dirty}"
 
 
-def claude_subcommands() -> set[str]:
-    """The subcommand names `claude --help` lists, aliases included (`plugin|plugins`)."""
-    result = subprocess.run(["claude", "--help"], capture_output=True, text=True)
+_CLAUDE_HELP: list[tuple[set[str], set[str]]] = []
+
+
+def claude_help() -> tuple[set[str], set[str]]:
+    """The subcommand names `claude --help` lists, aliases included (`plugin|plugins`), and its options, short
+    and long (`-p`, `--print`); read once a run."""
+    if _CLAUDE_HELP:
+        return _CLAUDE_HELP[0]
+    try:
+        result = subprocess.run(["claude", "--help"], capture_output=True, text=True)
+    except FileNotFoundError:
+        fail("claude is not on PATH.")
     if result.returncode != 0:
         fail(f"`claude --help` failed ({result.returncode}): {result.stderr.strip()}")
-    names, listing = set(), False
+    names, options, section = set(), set(), None
     for line in result.stdout.splitlines():
-        if line.startswith("Commands:"):
-            listing = True
+        if line.startswith(("Commands:", "Options:")):
+            section = line.split(":")[0]
             continue
-        match = listing and re.match(r"^  ([a-z][a-z|-]*)(?: |$)", line)
-        if match:
+        if section == "Commands" and (match := re.match(r"^  ([a-z][a-z|-]*)(?: |$)", line)):
             names.update(match.group(1).split("|"))
-    return names
+        elif section == "Options" and (match := re.match(r"^  (-\S.*?)(?:  |$)", line)):
+            options.update(re.findall(r"(?<![\w-])(--?[A-Za-z][\w-]*)", match.group(1)))
+    _CLAUDE_HELP.append((names, options))
+    return names, options
+
+
+def claude_subcommands() -> set[str]:
+    return claude_help()[0]
+
+
+def refuse_unknown_options(args: list[str]) -> None:
+    """LAUNCH-16: stop a launch on an option neither rig nor Claude Code knows, before any picker opens, rather
+    than hand Claude Code an option it will refuse. Says nothing when `claude --help` lists no options."""
+    known = claude_help()[1]
+    if not known:
+        return
+    end = args.index("--") if "--" in args else len(args)
+    unknown = [arg for arg in args[:end] if arg.startswith("-") and arg != "-"
+               and arg.split("=")[0] not in known | {"--sandbox", "--select"}]
+    if unknown:
+        hint = " For the graph: rig list --graph." if "--graph" in unknown else ""
+        fail(f"unknown option {', '.join(unknown)}; neither rig nor Claude Code takes it. See rig --help.{hint}")
 
 
 def exec_claude(args: list[str]) -> None:
@@ -337,7 +366,8 @@ def plan(selected: list[str], rigs: dict, installed: set[str], pins: list[dict],
     added = [p for p in dict.fromkeys(added) if p not in sources and p not in removed]
     sources.update({plugin_id: PICKED for plugin_id in added})
     in_rig = {plugin_id.split("@")[0] for plugin_id in sources}
-    offered = [PinOffer(pin, pin["plugin"] in in_rig, pinned_here(pin, cwd)) for pin in pins]
+    offered = [PinOffer(pin, pin["plugin"] in in_rig, cwd.resolve().is_relative_to(Path(pin["path"]).resolve()),
+                        pinned_here(pin, cwd)) for pin in pins]
     return Plan(selected, sources, [p for p in sources if p not in installed], offered, added, removed)
 
 
@@ -450,6 +480,7 @@ def ensure_config(args: list[str]) -> dict:
 def launch(selected: list[str] | None, args: list[str]) -> None:
     """RIG-06, LAUNCH-06, SANDBOX-01: launch the base rig with the named rigs, or with the default ones; at a
     terminal, stay Claude Code's parent so a switch can relaunch the conversation with other rigs."""
+    refuse_unknown_options(args)
     sandbox_flag, args = take_flag(args, "--sandbox")
     select_flag, args = take_flag(args, "--select")
     if select_flag and not interactive(args):
@@ -496,9 +527,9 @@ def confirmation(current: Plan, rows: list[str]) -> tuple[str, str | None]:
         if offer.locked:
             continue
         name = offer.pin["plugin"]
-        if offer.here and offer.in_rig:
-            lines.append(f"{HERE} {name}: you're in or above its checkout, so the installed copy loads; "
-                         f"its {PIN} can load it anyway.")
+        if offer.live and offer.selected:
+            lines.append(f"{LIVE} {name}: you're in or above its checkout, so the session runs on the files it "
+                         "edits; its row can skip it for this launch.")
         else:
             lines.append(f"{PIN} {name} isn't in these rigs, so its checkout loads only if you choose it.")
         rows_named.append(next((row for row in rows if row.split("@")[0] == name), None))
@@ -533,7 +564,7 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
         if current.missing:
             fail(f"{label(selected)} names plugins that aren't installed: {', '.join(current.missing)}. "
                  "Install them with `claude plugin install <plugin>`, or launch at a terminal to be asked.")
-        chosen = [(offer.pin, offer.selected) for offer in current.offered]
+        chosen = [(offer.pin, offer.in_rig) for offer in current.offered]
     elif select or current.missing or any(not offer.locked for offer in current.offered):
         plan_for = lambda names, *more: plan(names, rigs, installed, pins, cwd, *more)
         notice, focus = "", None
@@ -707,7 +738,7 @@ def switch_state(config: dict | None) -> dict:
         "installed": installed,
         "pins": [{"plugin": pin["plugin"], "path": pin["path"], "display": display(pin["path"]),
                   "age": age(pin["pinned_at"])} for pin in pins],
-        "here": [pin["path"] for pin in pins if pinned_here(pin, cwd)],
+        "here": [pin["path"] for pin in pins if cwd.is_relative_to(Path(pin["path"]))],
         "current": {"rigs": current, "added": added, "removed": removed, "pins": loads},
     }
 
@@ -812,7 +843,7 @@ def cmd_list(args: list[str]) -> int:
 
 
 PIN = "📌"
-HERE = "⌂"  # a pin skipped because the launch starts in or above its checkout
+LIVE = "❗"  # in place of 📌 on a pin loading while the launch starts in or above its checkout
 
 
 def cells(text: str) -> int:
@@ -830,8 +861,13 @@ def pinned_names(pins: list[dict]) -> set[str]:
 
 
 def plugin_cell(plugin_id: str, pinned: set[str]) -> str:
-    """PIN-12: the one way rig writes a plugin's name, marked 📌 when a checkout is pinned for it."""
-    return f"{plugin_id} {PIN}" if plugin_id.split("@")[0] in pinned else plugin_id
+    """PIN-12: the one way rig writes a plugin's name, marked 📌 in front when a checkout is pinned for it."""
+    return f"{PIN} {plugin_id}" if plugin_id.split("@")[0] in pinned else plugin_id
+
+
+def graph_label(plugin_id: str, pinned: set[str], margin: str) -> str:
+    """PIN-12: a graph row's name, its 📌 in the left margin, the names lined up whether pinned or not."""
+    return plugin_cell(plugin_id, pinned) if plugin_id.split("@")[0] in pinned else margin + plugin_id
 
 
 Piece = tuple[str, int | None]
@@ -846,9 +882,10 @@ class Graph(NamedTuple):
     labels: list[str]
     heads: list[str]
     width: int
+    margin: str = ""  # room for a 📌 in front of the names, when any row is pinned
 
     def header(self) -> list[Piece]:
-        return [(pad("plugin", self.width), -1), *self.cells([(head, i) for i, head in enumerate(self.heads)])]
+        return [(pad(self.margin + "plugin", self.width), -1), *self.cells([(head, i) for i, head in enumerate(self.heads)])]
 
     def row(self, index: int) -> list[Piece]:
         plugin_id = self.rows[index]
@@ -880,9 +917,11 @@ def graph_of(rigs: list[dict], installed: list[str], pins: list[dict]) -> Graph:
     rows += [p for p in installed if p not in rows]
     shown = {p.split("@")[0] for p in rows}
     rows += [pin["plugin"] for pin in pins if pin["plugin"] not in shown]
-    labels = [plugin_cell(p, pinned_names(pins)) for p in rows]
+    pinned = pinned_names(pins)
+    margin = " " * cells(f"{PIN} ") if any(p.split("@")[0] in pinned for p in rows) else ""
+    labels = [graph_label(p, pinned, margin) for p in rows]
     heads = [("★" if rig["default"] else "") + rig["name"] for rig in rigs]
-    return Graph(rigs, rows, labels, heads, max([cells(label) for label in labels] + [len("plugin")]))
+    return Graph(rigs, rows, labels, heads, max([cells(label) for label in labels] + [cells(margin + "plugin")]), margin)
 
 
 def graph(rigs: list[dict], installed: list[str], pins: list[dict] = ()) -> str:
@@ -1121,18 +1160,19 @@ BUILT_IN = {BASE: "built-in, every launch", FULL: "built-in, every installed plu
 class PinOffer(NamedTuple):
     pin: dict
     in_rig: bool
-    here: bool
+    here: bool  # the launch starts inside the checkout
+    live: bool = False  # the launch starts inside the checkout or in a folder above it
 
     @property
     def selected(self) -> bool:
-        """PIN-07..09: offered loading in the picker when the rigs include it, unless the launch starts in or
-        above its checkout, where the installed copy loads for this launch unless the user loads it anyway."""
-        return self.in_rig and not self.here
+        """PIN-07..09: offered loading in the picker when the rigs include it or the launch starts inside it."""
+        return self.in_rig or self.here
 
     @property
     def locked(self) -> bool:
-        """PIN-08: a pin the rigs include loads, unless the launch starts inside it."""
-        return self.in_rig and not self.here
+        """PIN-08: a pin the rigs include loads, unless the launch starts in or above its checkout, where the
+        session would run on the files it edits, so it can be skipped for this launch."""
+        return self.in_rig and not self.live
 
 
 def checked_pins() -> list[dict]:
@@ -1150,7 +1190,7 @@ EDIT = "edit"  # what the picker exits with to open the rig editor, along with w
 ON, PARTIAL, OFF = "on", "partial", "off"  # how much of a rig the picker's launch loads
 HEADER_LINES = 2  # the picker's rig names and the ✓ row under them
 RIGS = -1  # the picker's cursor row when it's on the rig names
-COUNTDOWN_CELLS, COUNTDOWN_STEP = 5, 0.5  # the 🚀's countdown: lights, and seconds between them
+COUNTDOWN_CELLS, COUNTDOWN_STEP = 5, 0.5  # the 🚀's countdown: chevrons, and seconds between them
 
 
 def invocation() -> str:
@@ -1181,14 +1221,14 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
     names = [rig["name"] for rig in columns]
     defaults = any(rig["default"] for rig in columns)
 
-    def legend(states: list[str], skipped: bool) -> list[Text]:
-        """LAUNCH-07, LAUNCH-11: what the marks on screen mean, one to a line down the right of the graph so it
-        stays narrow: ★ when a rig is a default, ✓ when a rig besides base (which always loads) carries one, ◐
-        while a rig does, ⌂ while a pin is skipped because the launch starts in or above its checkout."""
+    def legend(states: list[str], live: bool) -> Text:
+        """LAUNCH-07, LAUNCH-11: what the marks on screen mean, in the graph's top border so it takes no width
+        from the graph: ★ when a rig is a default, ✓ when a rig besides base (which always loads) carries one,
+        ◐ while a rig does, ❗ while a pin loads whose checkout the launch starts in or above."""
         keys = [(("★", ""), "default", defaults), (("✓", f"bold {DRACULA['accent']}"), "loads", ON in states[1:]),
                 (("◐", f"bold {NOTE}"), "part", PARTIAL in states),
-                ((HERE, f"bold {NOTE}"), "pin off here", skipped)]
-        return [Text.assemble(mark, (f" = {meaning}", MUTED)) for mark, meaning, shown in keys if shown]
+                ((LIVE, ""), "live checkout", live)]
+        return Text("  ").join(Text.assemble(mark, (f" = {meaning}", MUTED)) for mark, meaning, shown in keys if shown)
 
     layout = graph_of(columns, installed, pins)
 
@@ -1213,10 +1253,7 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
             states = [app.state(column) for column in range(len(names))]
             cursor = f"on {CURSOR_ROW}"
             on_rig = lambda column: self.row == RIGS and column == self.column
-            skipped = {offer.pin["plugin"] for offer in current.offered
-                       if offer.in_rig and offer.here and not app.load(offer)}
-            keys = legend(states, bool(skipped))
-            edge = sum(cells(text) for text, _ in layout.header())
+            live = app.live()
             lines = [Text(), Text()]
             for text, column in layout.header():
                 style = "bold" if column == -1 else ""
@@ -1242,17 +1279,14 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
                         style = DRACULA["add"] if on else MUTED
                     else:
                         style = ""
+                    if column == -1 and plugin_id.split("@")[0] in live:
+                        text = text.replace(PIN, LIVE)
                     line.append(text, style)
-                if plugin_id.split("@")[0] in skipped:
-                    line.append(f"  {HERE}", f"bold {NOTE}")
                 if plugin_id in current.missing:
                     line.append("  installs at launch", WARN)
                 if index == self.row:
                     line.stylize(cursor)
                 lines.append(line)
-            for line, key in zip(lines, keys):
-                line.append(" " * (max(edge - cells(line.plain), 0) + 4))
-                line.append_text(key)
             return Text("\n", no_wrap=True).join(lines)
 
         def measure(self) -> int:
@@ -1297,13 +1331,14 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
             self.app.exit((EDIT, current.selected, current.added, current.removed))
 
         def on_click(self, event) -> None:
-            """A click on a rig's name toggles the rig; on a pinned plugin's row it opens the pin, and on any
-            other plugin's row toggles the plugin. The cursor moves to what was clicked."""
+            """A click in a rig's column, on its name or any row under it, toggles the rig, the more common
+            want; on a plugin's name, a pinned plugin's opens the pin and any other's toggles the plugin. The
+            cursor moves to what was clicked."""
             offset = event.get_content_offset(self)
             if offset is None:
                 return
             column = layout.column_at(offset.x)
-            if offset.y < HEADER_LINES and column is not None and column >= 0:
+            if offset.y < HEADER_LINES + len(layout.rows) and column is not None and column >= 0:
                 if column > 0:
                     self.column, self.row = column, RIGS
                 self.app.toggle_rig(column)
@@ -1313,8 +1348,8 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
             self.refresh()
 
     class Rocket(Widget):
-        """LAUNCH-13: the launch item at the right end of the footer, a 🚀 behind a row of lights that come
-        on one at a time toward it, a countdown that runs twice as fast under the pointer."""
+        """LAUNCH-13: the launch item at the right end of the footer, a 🚀 behind a row of chevrons that
+        light one at a time toward it, a countdown that runs twice as fast under the pointer."""
 
         def __init__(self):
             super().__init__(id="launch")
@@ -1339,9 +1374,13 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
             self.app.action_launch()
 
         def render(self) -> Text:
-            lit = self.tick % (COUNTDOWN_CELLS + 1)
-            lights = "●" * lit + "·" * (COUNTDOWN_CELLS - lit)
-            return Text.assemble((" l ", "bold"), "Launch ", (lights, DRACULA["background"]), " 🚀 ")
+            lit = self.lit
+            return Text.assemble((" l ", "bold"), "Launch ", (">" * lit, f"bold {DRACULA['background']}"),
+                                 (">" * (COUNTDOWN_CELLS - lit), MUTED), " 🚀 ")
+
+        @property
+        def lit(self) -> int:
+            return self.tick % (COUNTDOWN_CELLS + 1)
 
     class PinDialog(ModalScreen):
         """PIN-13: one pin's checkout, age, and whether it loads, with Unpin the default, a button that takes
@@ -1370,8 +1409,8 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
                         yield Button("Leave out" if loaded else "Load", id="toggle")
                     if not self.offer.locked:
                         checkout = self.app.load(self.offer)
-                        label = "Load anyway" if self.offer.here else "Load checkout"
-                        yield Button("Skip checkout" if checkout else label, id="pin-load")
+                        skip = "Skip for this launch" if self.offer.live else "Skip checkout"
+                        yield Button(skip if checkout else "Load checkout", id="pin-load")
 
         def details(self) -> Text:
             app, offer = self.app, self.offer
@@ -1380,12 +1419,12 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
                 state = "in these rigs, so the checkout loads"
             elif app.load(offer):
                 state = "the checkout loads"
-            elif offer.here:
-                state = "you're in or above its checkout, so the installed copy loads this launch"
             else:
                 state = "the installed copy loads" if loaded else "not loaded"
+            warning = (f"\n\n{LIVE} You're launching in or above this checkout, so the session runs on the files it "
+                       "edits, and its results can be unpredictable." if offer.live else "")
             return Text.assemble((f"{display(offer.pin['path'])}\n", NOTE),
-                                 (f"pinned {age(offer.pin['pinned_at'])}\n", MUTED), state)
+                                 (f"pinned {age(offer.pin['pinned_at'])}\n", MUTED), state, (warning, WARN))
 
         def on_mount(self) -> None:
             self.query_one("#unpin", Button).focus()
@@ -1415,7 +1454,8 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
         CSS = f"""
         Screen.picker {{ border: round $border; border-title-align: center; border-title-color: $text; }}
         #summary, #sandbox {{ padding: 0 1; }}
-        #scroll {{ height: 1fr; border: round $border; padding: 0 1; }}
+        #scroll {{ height: 1fr; border: round $border; padding: 0 1; border-title-align: right;
+                   scrollbar-size-vertical: 1; }}
         #graph {{ width: auto; height: auto; }}
         #bar {{ dock: bottom; height: 1; }}
         #bar Footer {{ dock: none; width: 1fr; }}
@@ -1441,8 +1481,6 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
             yield Static(id="summary")
             with ScrollableContainer(id="scroll") as scroll:
                 scroll.can_focus = False
-                scroll.border_subtitle = (f"arrows or tab move  space, enter, or a click toggles a rig or a plugin, "
-                                          f"and opens a {PIN}")
                 yield Picker()
             yield Static(f"sandbox: {'on' if sandbox else 'off'}", id="sandbox")
             with Horizontal(id="bar"):
@@ -1467,8 +1505,13 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
         def load(self, offer: PinOffer) -> bool:
             return offer.locked or self.pin_choices.get(offer.pin["path"], offer.selected)
 
+        def live(self) -> set[str]:
+            """PIN-07: the pins loading whose checkouts the launch starts in or above."""
+            return {offer.pin["plugin"] for offer in self.current.offered if offer.live and self.load(offer)}
+
         def show(self) -> None:
             self.query_one("#summary", Static).update(summary(self.current))
+            self.query_one("#scroll").border_title = legend([self.state(c) for c in range(len(names))], bool(self.live()))
             picker = self.query_one(Picker)
             picker.styles.width = picker.measure()
             picker.refresh()
@@ -1536,7 +1579,7 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
             write_pins([p for p in read_pins() if p["path"] != pin["path"]])
             pins.remove(pin)
             for index, plugin_id in enumerate(layout.rows):
-                layout.labels[index] = plugin_cell(plugin_id, pinned_names(pins))
+                layout.labels[index] = graph_label(plugin_id, pinned_names(pins), layout.margin)
             self.pin_choices.pop(pin["path"], None)
             current = self.current
             self.current = plan_for(current.selected, current.added, current.removed)
@@ -1574,10 +1617,10 @@ def pin_lines(pins: list[tuple[dict, list[str]]]) -> list[str]:
 
 
 def describe_pins(chosen: list[tuple[dict, bool]], cwd: Path | None = None) -> list[str]:
-    """LAUNCH-02, PIN-07: the pins on the launch summary, saying which were skipped for starting in or above
-    their checkouts."""
-    note = lambda pin: f"not loaded, {HERE} checkout here" if cwd and pinned_here(pin, cwd) else "not loaded"
-    return pin_lines([(pin, [] if load else [note(pin)]) for pin, load in chosen]) or [f"{PIN} none"]
+    """LAUNCH-02, PIN-07: the pins on the launch summary, marking the live checkouts the launch runs in."""
+    notes = lambda pin, load: ([f"{LIVE} live checkout"] if cwd and pinned_here(pin, cwd) else []) if load \
+        else ["not loaded"]
+    return pin_lines([(pin, notes(pin, load)) for pin, load in chosen]) or [f"{PIN} none"]
 
 
 def user_settings_file() -> Path:
@@ -2752,8 +2795,9 @@ Commands:
   doctor                     check the rig command, the claude function, and tab completion
                              in a new zsh, then run Claude Code's doctor
 
-Anything else goes to Claude Code: its subcommands run unchanged, and other
-arguments start a session with the default rigs. The install makes `claude` run
+Anything else goes to Claude Code: its subcommands run unchanged, and its options
+and a prompt start a session with the default rigs. rig refuses a word that is
+neither command, and an option neither takes; put a one-word prompt after `--`. The install makes `claude` run
 `rig claude`, which does the same, and launches the default rigs when given no
 arguments. `rig rig <command>` is the same as `rig <command>`.
 
@@ -2815,6 +2859,11 @@ def main(argv: list[str]) -> int:
         return COMMANDS[argv[0]](argv[1:])
     if argv and not argv[0].startswith("-") and argv[0] in claude_subcommands():
         exec_claude(argv)
+    if argv and not as_claude and not argv[0].startswith("-") and not re.search(r"\s", argv[0]):
+        config = load_config()
+        hint = f"to launch that rig: rig use {argv[0]}" if config and argv[0] in config["rigs"] \
+            else f"to start a session with it as the prompt: rig -- {argv[0]}"
+        fail(f"unknown command {argv[0]}. See rig --help; {hint}")
     launch(None, argv)
 
 

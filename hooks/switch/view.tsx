@@ -156,7 +156,7 @@ function graphView(kit: Kit, model: PaneModel): RenderElement {
       <Text>{Model.summary(plan)}</Text>
       <Box height={1} />
       <Box flexDirection="row">
-        <Text bold>{Model.pad('plugin', graph.width)}</Text>
+        <Text bold>{Model.pad(graph.margin + 'plugin', graph.width)}</Text>
         {heads}
       </Box>
       <Box flexDirection="row">
@@ -213,7 +213,7 @@ function pinView(kit: Kit, model: PaneModel, pluginId: string): RenderElement {
         ) : null}
         {Model.isLocked(offer) ? null : (
           <Button key={KEYS.LOAD} onPress={() => kit.actions.togglePin(pluginId)}>
-            {isCheckout ? 'Skip checkout' : offer.here ? 'Load anyway' : 'Load checkout'}
+            {isCheckout ? 'Skip checkout' : 'Load checkout'}
           </Button>
         )}
         <Button key={KEYS.CLOSE} onPress={kit.actions.closeDialog}>

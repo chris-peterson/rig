@@ -269,10 +269,12 @@ When the user runs `rig pins`, the system shall list the pins, indented one
 space, with when each was pinned.
 
 #### `PIN-07`
-When a launch starts inside a pinned checkout or in a folder above one, the
-system shall load the installed copy in place of that checkout for that launch
-only, marking the pin with ⌂ in the picker and its legend and offering to load
-the checkout anyway.
+When an interactive launch starts inside a pinned checkout, the system shall
+offer that pin in the picker, loading. When a launch loading a pin starts inside
+its checkout or in a folder above it, the system shall mark the pin ❗ in place
+of 📌 in the picker and its legend, warn in the pin's dialog that the session
+runs on the files it edits, and offer to skip the checkout for that launch
+only.
 
 #### `PIN-08`
 When a launch's rigs include a pinned plugin, the system shall load the pinned
@@ -287,8 +289,8 @@ If a launch's rigs do not include a pinned plugin and no one is at a terminal
 to ask, then the system shall launch without that pin.
 
 #### `PIN-11`
-Where a launch loads anyway a pin whose checkout holds the working directory or
-sits inside it, the system shall start Claude Code with
+Where a launch loads a pin whose checkout holds the working directory or sits
+inside it, the system shall start Claude Code with
 `CLAUDE_CODE_AUTO_MODE_SERVER=0`, unless the environment already sets it, and
 say so before Claude Code starts.
 
@@ -297,9 +299,9 @@ say so before Claude Code starts.
 > removal, so this requirement expires with it; retire it once #95982 is fixed.
 
 #### `PIN-12`
-The system shall mark each pinned plugin with 📌 wherever it lists plugins or
-pins: the launch summary, `rig pins`, `rig list`, the graph, the picker, the
-switch pane, and the rig editor.
+The system shall mark each pinned plugin with 📌 in front of its name wherever
+it lists plugins or pins: the launch summary, `rig pins`, `rig list`, the graph,
+the picker, the switch pane, and the rig editor.
 
 #### `PIN-13`
 When the user toggles a pinned plugin's row in the picker, the system shall
@@ -334,9 +336,11 @@ When a launch starts, the system shall print the rigs, the rule that made each
 rig a default, the pins, and the sandbox state before Claude Code starts.
 
 #### `LAUNCH-03`
-When the user runs `rig` with arguments that don't start with one of rig's
-commands, the system shall launch the default rig and pass the arguments to
-Claude Code.
+When the user runs `rig` with arguments that start with an option or a prompt
+of more than one word, the system shall launch the default rig and pass the
+arguments to Claude Code; if they start with a single word that is neither
+rig's command nor Claude Code's, then the system shall refuse it as an unknown
+command.
 
 #### `LAUNCH-04`
 When the first argument is a Claude Code subcommand, the system shall run
@@ -360,8 +364,9 @@ with the command line that opened it: the plugins against the rigs as
 `rig list --graph` shows them, with `full` among the rigs, each row on one line,
 marking under each rig whether the launch loads it whole or in part, with one
 cursor on a rig's name or a plugin's row that the arrow keys and tab move,
-toggling what the cursor is on with space or enter as a click on it does, a
-rig other than the base rig toggling on a click on its name, launching on `l`,
+toggling what the cursor is on with space or enter, a rig other than the base
+rig toggling on a click on its name or anywhere in its column, a plugin
+toggling on a click on its name, launching on `l`,
 Shift+Enter, or a click on the footer's 🚀, and refusing the launch on `q`.
 
 #### `LAUNCH-09`
@@ -400,6 +405,11 @@ the system shall put the session's rigs on beacon's pane badge, separated by
 #### `LAUNCH-15`
 If the terminal goes away while the picker or the rig editor is open, then the system shall exit as a hangup ends it, even when it
 started with SIGHUP ignored.
+
+#### `LAUNCH-16`
+If a launch's arguments carry, before any `--`, an option that neither rig nor
+Claude Code's `--help` lists, then the system shall refuse the launch before
+the picker opens, naming the option.
 
 ### `SWITCH`
 Switching rigs mid-session

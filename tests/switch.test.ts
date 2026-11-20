@@ -65,7 +65,7 @@ describe('switch', () => {
 
     expect(drawn).toContain('rig switch')
     expect(drawn).toContain('base + web: 3 plugins')
-    expect(drawn).toContain('rig@cp 📌')
+    expect(drawn).toContain('📌 rig@cp')
     expect(drawn).toContain('★web')
     expect(drawn).toContain('Switch 🚀')
   })
