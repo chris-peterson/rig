@@ -19,12 +19,23 @@ Maintained by `/sextant:spec-status`.
 | PIN-01..14 | 14 | All Covered | `scripts/rig`, `hooks/switch/model.ts`, tests in `tests/test_rig.py` and `tests/switch*.test.ts`. PIN-07 and PIN-09 offer pins in the picker, driven through a pty. PIN-12's 📌 comes from `plugin_cell` and `pin_lines`, one each for a plugin's name and a pin's line, and the graph pads it as two cells (`cells`). PIN-08 uses `--plugin-dir`: the checkout loads as `<name>@inline` and the installed copy doesn't load, including when the overlay disables it (verified 2026-11-10). PIN-11 (`auto_mode_server_off`) works around anthropics/claude-code#95982 |
 | SANDBOX-01 | 1 | All Covered | `scripts/rig`, tests in `tests/test_rig.py`. The overlay carries ai-sdlc's strict sandbox block plus `autoAllowBashIfSandboxed`, which Claude Code 2.1.325 turned off by default; a launch on a machine without the sandbox hasn't been tried |
 | LAUNCH-01..16 | 16 | All Covered | `scripts/rig` (`launch`, `claude_args`, `confirmation`, `select_app`, `run_claude`, `run_app`), tests in `tests/test_rig.py`; LAUNCH-05 and LAUNCH-07..13 drive the picker with Textual's pilot, keys and clicks, and through a pty. LAUNCH-05 opens the picker with a Textual notification as its notice, the cursor on the first pin to choose. The picker draws the same `Graph` pieces `rig list --graph` prints. LAUNCH-14 is `cmd_badge`, run by `hooks/beacon-badge.sh` at SessionStart; tests use a stand-in beacon, and a live badge hasn't been tried. LAUNCH-13's click is driven through the handler, since Textual's pilot can't click the bar on a bordered screen's inner edge. LAUNCH-06's Ctrl-C handling is untested. A launch whose arguments carry `--settings` is refused, since a second `--settings` replaces the first (verified 2026-11-10). LAUNCH-15's tests close the picker's pty with SIGHUP ignored and with no controlling terminal; the editor shares `run_app` but isn't driven through a hangup |
-| SWITCH-01..05 | 5 | All Covered | The `/rig` mod (`hooks/switch.ts`, `hooks/switch/model.ts`, `hooks/switch/view.tsx`) over `scripts/rig` (`cmd_switch`, `switch_state`, `launch`, `claude_args`, `take_switch`); tests in `tests/test_rig.py` have a stand-in claude run `rig switch`, with rigs and with `--picks`, and check the relaunch, and `tests/switch.test.ts` drives the mod under `claude plugin test`. The command is `/rig`, not `/rig:switch`: a mod can't register a name with `:` (Claude Code 2.1.329). The mod's exit through `$.command.run` was tried live; the pane hasn't been driven interactively, and its focus-follow scroll is untested |
+| SWITCH-01..05 | 5 | All Covered | The `/rig` mod (`hooks/switch.ts`, `hooks/switch/model.ts`, `hooks/switch/view.tsx`) over `scripts/rig` (`cmd_switch`, `switch_state`, `launch`, `claude_args`, `take_switch`); tests in `tests/test_rig.py` have a stand-in claude run `rig switch`, with rigs and with `--picks`, and check the relaunch, and `tests/switch.test.ts` drives the mod under `claude plugin test`. The command is `/rig`, not `/rig:switch`: a mod can't register a name with `:` (Claude Code 2.1.329). The mod's exit through `$.command.run` was tried live; the pane hasn't been driven interactively, and its focus-follow scroll is untested. SWITCH-05's narrow layout follows the `Pane`'s `bodyColumns` (`acrossWidth`, `tiersOf`, `stagger`) and asks the dock for `columns`; the staggered rows are checked as text, not as drawn |
 | SHELL-01..06 | 6 | All Covered | `scripts/rig` (`main`, `cmd_install_cli`), `commands/install-rig.md`, `hooks/cli-freshness.sh`; tests run the install against a throwaway HOME |
 | TAB-01..06 | 6 | All Covered | `scripts/rig` (`ZSH_COMPLETION`); tests check parity, zsh syntax, and the awk readers, and run `_rig` in zsh with stand-ins for `compadd` and `_default` for TAB-03 and TAB-06. Live completion inside a real widget (`IPREFIX` after a comma) hasn't been tried |
 | DOCTOR-01..05 | 5 | All Covered | `scripts/rig` (`cmd_doctor`, `shell_probe`), tests in `tests/test_rig.py` probe a new zsh in a throwaway HOME. On a live machine (2026-11-10) it caught a `~/.zcompdump` from before `_rig`, read by `compinit -C` |
 
 ## Audit history
+
+### 2026-11-20: A narrow switch pane
+
+SWITCH-05 reworded: the pane names plugins without their marketplace,
+staggers the rig names over rows when the pane is too narrow for one, asks the
+dock for only the width two such rows take, and ends the pin toast in ✕. `l`
+with nothing changed now closes the pane and keeps the session: it used to exit
+Claude Code with no switch recorded, so rig ended instead of relaunching.
+The pane colors what a switch brings in green and what it takes out red
+(`changesOf`), and lists those plugins under the summary. Still Covered.
+Coverage 95 of 95.
 
 ### 2026-11-20: Bare rig picks, pins lists
 

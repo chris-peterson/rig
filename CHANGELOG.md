@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- The `/rig` pane fits a sidebar: it names plugins without their marketplace
+  (unless two share a name), staggers the rig names over two or more rows
+  when they don't fit on one, and docks only as wide as that needs. The toast for
+  a pin holding your folder ends in ✕; a click on it closes it.
+- The `/rig` pane shows what you change against what the session loads: rigs
+  and plugins coming in turn green, ones going turn red, and a line under the
+  summary lists the plugins each way.
+- `l` in the `/rig` pane with nothing changed closes the pane and keeps the
+  session. It used to exit Claude Code without recording a switch, so rig
+  ended instead of relaunching.
 - `rig` with no arguments opens the `--select` picker at a terminal instead of
   printing its usage. `claude` with no arguments still launches the default
   rigs straight away.

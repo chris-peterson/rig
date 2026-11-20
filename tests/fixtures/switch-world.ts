@@ -48,6 +48,8 @@ type Reply = { exitCode: number; stdout: string; stderr: string; isStdoutTruncat
 export type World = {
   runs: string[][]
   opened: string[]
+  /** The columns each open asked the dock for. */
+  openArgs: { columns?: number | undefined }[]
   closed: string[]
   toasts: string[]
   logs: string[]
@@ -64,6 +66,7 @@ export function worldOf(on: On, state: State = STATE): World {
   const world: World = {
     runs: [],
     opened: [],
+    openArgs: [],
     closed: [],
     toasts: [],
     logs: [],
@@ -111,6 +114,7 @@ export function worldOf(on: On, state: State = STATE): World {
 
   on('ui.open', ($, e) => {
     world.opened.push(e.id)
+    world.openArgs.push({ columns: e.columns })
 
     return { value: { isPlaced: true as const } }
   })
@@ -162,5 +166,8 @@ export function textOf(tree: unknown): string {
 
   const children = Reflect.get(tree, 'children') ?? (typeof props === 'object' && props ? Reflect.get(props, 'children') : [])
 
-  return `${labelOf('label')}${textOf(children ?? [])}`
+  const text = textOf(children ?? [])
+
+  // A Button drawn from children carries their text as its label too.
+  return text === '' ? labelOf('label') : text
 }

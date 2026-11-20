@@ -66,17 +66,43 @@ describe('switch-model', () => {
 
     expect(Model.pinStateOf(plan, 'rig@cp', skipped.choices)).toBe('the installed copy loads')
     expect(Model.recorded(STATE, skipped).pins).toEqual({ '/src/rig': false })
-    expect(Model.hereNotes(STATE, skipped)).toEqual(['📌 rig holds this folder: the installed copy loads'])
+    expect(Model.hereNotes(STATE, skipped)).toEqual(['📌 rig holds this folder: the installed copy loads  ✕'])
   })
 
-  test('RIG-14, PIN-12: the graph lists rigs’ plugins, then the rest installed, a 📌 in front of pinned ones', () => {
+  test('RIG-14, PIN-12, SWITCH-05: the graph lists rigs’ plugins, then the rest installed, by name, a 📌 in front of pinned ones', () => {
     const graph = Model.graphOf(STATE)
 
     expect(graph.rows).toEqual(['anchor@getty', 'splunk@getty', 'rig@cp', 'beacon@getty', 'tack@cp'])
-    expect(graph.labels[2]).toBe('📌 rig@cp')
-    expect(graph.labels[1]).toBe('   splunk@getty')
+    expect(graph.labels[2]).toBe('📌 rig')
+    expect(graph.labels[1]).toBe('   splunk')
     expect(graph.heads).toEqual(['base', 'ops', '★web', 'full'])
-    expect(graph.width).toBe(Model.cells('   splunk@getty'))
+    expect(graph.width).toBe(Model.cells('   anchor'))
+    expect(Model.acrossWidth(graph)).toBe(graph.width + 2 + 4 + 2 + 3 + 2 + 4 + 2 + 4)
+    expect(Model.tiersOf(graph, 2)).toEqual({ tiers: 2, pitch: 3, width: graph.width + 14 })
+    expect(Model.stagger(graph, 80)).toBeNull()
+    expect(Model.stagger(graph, graph.width + 14)?.tiers).toBe(2)
+    expect(Model.stagger(graph, graph.width + 13)).toEqual({ tiers: 3, pitch: 2, width: graph.width + 11 })
+  })
+
+  test('SWITCH-05: a row keeps its marketplace when another row shares its name', () => {
+    const graph = Model.graphOf({ ...STATE, installed: [...STATE.installed, 'tack@getty'] })
+
+    expect(graph.labels.slice(-2)).toEqual(['   tack@cp', '   tack@getty'])
+  })
+
+  test('SWITCH-05: the changes are against what the session loads: rows and rigs that come in or go', () => {
+    expect(Model.changesOf(STATE, start)).toEqual({ rows: [null, null, null, null, null], rigs: [null, null, null, null] })
+
+    const ops = Model.toggleRig(STATE, Model.toggleRig(STATE, start, 'ops') ?? start, 'web') ?? start
+
+    expect(Model.changesOf(STATE, ops)).toEqual({
+      rows: [null, 'added', 'removed', 'removed', null],
+      rigs: [null, 'added', 'removed', null],
+    })
+
+    const full = Model.toggleRig(STATE, start, 'full') ?? start
+
+    expect(Model.changesOf(STATE, full).rigs).toEqual([null, 'added', null, 'added'])
   })
 
   test('marks centre as Python’s str.center does', () => {

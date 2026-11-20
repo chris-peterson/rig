@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
+import * as Model from '../hooks/switch/model'
 import { PANE, SESSION, SESSION_ID, STATE, commandOf, textOf, worldOf } from './fixtures/switch-world'
 
 const press = (key: string) => ({ plugin: 'rig', key })
@@ -59,15 +60,49 @@ describe('switch', () => {
 
     expect(world.runs).toEqual([['switch', '--state']])
     expect(world.opened).toEqual(['rig-switch'])
-    expect(world.toasts).toEqual(['📌 rig holds this folder: its checkout loads'])
+    expect(world.toasts).toEqual(['📌 rig holds this folder: its checkout loads  ✕'])
 
     const drawn = textOf(await $.ui.render(PANE))
 
     expect(drawn).toContain('rig switch')
     expect(drawn).toContain('base + web: 3 plugins')
-    expect(drawn).toContain('📌 rig@cp')
+    expect(drawn).toContain('📌 rig')
+    expect(drawn).not.toContain('rig@cp')
     expect(drawn).toContain('★web')
     expect(drawn).toContain('Switch 🚀')
+  })
+
+  test('SWITCH-05: a pane too narrow for the rig names across staggers them over rows', async ($, on) => {
+    const world = worldOf(on)
+
+    await $.session.start(SESSION)
+    await $.command.run(commandOf())
+
+    const wide = textOf(await $.ui.render(PANE))
+    const narrow = textOf(await $.ui.render({ ...PANE, props: { ...PANE.props, bodyColumns: 24 } }))
+
+    expect(wide).toContain('   plugin  base  ops  ★web  full')
+    expect(narrow).toContain('          base  ★web')
+    expect(narrow).toContain('   plugin    ops   full')
+    expect(world.openArgs[0]?.columns).toBe(32)
+  })
+
+  test('SWITCH-05: what the switch brings in shows green and what it takes out red', async ($, on) => {
+    worldOf(on)
+
+    await $.session.start(SESSION)
+    await $.command.run(commandOf())
+
+    expect(textOf(await $.ui.render(PANE))).not.toContain('+ splunk')
+
+    await $.ui.press(press('rig:ops'))
+    await $.ui.press(press('rig:web'))
+
+    const drawn = await $.ui.render(PANE)
+
+    expect(textOf(drawn)).toContain('+ splunk')
+    expect(textOf(drawn)).toContain('- 📌 rig, beacon')
+    expect(JSON.stringify(drawn)).toContain('#ff5555')
   })
 
   test('LAUNCH-09: choosing full takes the other rigs away, and a rig takes full away', async ($, on) => {
@@ -145,6 +180,27 @@ describe('switch', () => {
     expect(world.closed).toEqual(['rig-switch'])
     expect(world.logs).toEqual(['rig: relaunching this conversation with base + ops.'])
     expect(world.exits).toBe(1)
+  })
+
+  test('SWITCH-05: l with nothing changed closes the pane and keeps the session, since rig records no switch', async ($, on) => {
+    const world = worldOf(on)
+    const clock = mock.clock(on)
+    const answer = world.answer
+
+    world.answer = args =>
+      args.includes('--picks')
+        ? { exitCode: 0, stdout: 'rig: this session already uses base + web.\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+        : answer(args)
+
+    await $.session.start(SESSION)
+    await $.command.run(commandOf())
+    await $.ui.render(PANE)
+    await $.ui.press(press('switch'))
+    await clock.advance(10)
+
+    expect(world.closed).toEqual(['rig-switch'])
+    expect(world.logs).toEqual(['rig: this session already uses base + web.'])
+    expect(world.exits).toBe(0)
   })
 
   test('SWITCH-05: cancel closes the pane, says so, and records nothing', async ($, on) => {

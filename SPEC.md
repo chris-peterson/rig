@@ -439,9 +439,15 @@ the switch, naming the rigs.
 When the user runs `/rig` naming no rig in a session rig launched at a
 terminal, the system shall open a pane with the picker's graph, set to the
 rigs, plugins, and pins the session loads, toggling them as the picker does,
-with a toast naming each pin that holds the working directory and whether its
-checkout loads; it shall record the switch and exit Claude Code on `l`, and
-close without a switch on escape or `q`.
+with a toast ending in ✕ naming each pin that holds the working directory and
+whether its checkout loads; it shall record the switch and exit Claude Code on
+`l`, or, when the picks are what the session already loads, close and keep the
+session, and close without a switch on escape or `q`. The pane shall name each
+plugin without its marketplace unless two rows share the name, stagger the rig
+names over as few rows as fit when the pane is too narrow for them on one, and
+ask a docked seat for no more width than two such rows take. Against what the
+session loads, it shall show each rig and plugin the switch brings in in green
+and each it takes out in red, listing those plugins under the summary.
 
 ### `SHELL`
 Shell integration

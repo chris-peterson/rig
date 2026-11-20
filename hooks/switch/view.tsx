@@ -9,6 +9,7 @@ import * as Model from './model'
 export const COLORS = {
   accent: '#bd93f9',
   add: '#50fa7b',
+  remove: '#ff5555',
   note: '#f1fa8c',
   warn: '#ffb86c',
 } as const
@@ -38,6 +39,8 @@ export type Actions = {
 export type Kit = {
   ui: Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
   actions: Actions
+  /** The cells across the pane's body: the rig names go down their columns when across doesn't fit. */
+  columns: number
 }
 
 export type PaneModel = {
@@ -49,7 +52,7 @@ export type PaneModel = {
   focus: string | null
 }
 
-const HINT = `↑/↓ or tab move · enter toggles a rig or plugin, opens a ${Model.PIN} · l switches · esc cancels`
+const HINT = `↑/↓ tab move · enter toggles, opens a ${Model.PIN} · l switches · esc cancels`
 
 /** The pane's body: the graph `rig --select` draws, or one pin's dialog over it. */
 export function paneView(kit: Kit, model: PaneModel): RenderElement {
@@ -64,6 +67,12 @@ function graphView(kit: Kit, model: PaneModel): RenderElement {
   const states = graph.rigs.map(rig => Model.rigState(rig, plan))
   const legend = Model.legendOf(graph, states)
   const startKey = model.focus ?? KEYS.rigOf(graph.rigs[1]?.name ?? Model.BASE)
+  const tiered = Model.stagger(graph, kit.columns)
+  const changes = Model.changesOf(state, picks)
+
+  /** A name in green when the switch brings it in, red when it takes it out, else as it was. */
+  const named = (text: string, change: Model.Change) =>
+    change === null ? text : <Text color={change === 'added' ? COLORS.add : COLORS.remove}>{text}</Text>
 
   const markOf = (state: Model.RigState) =>
     state === 'on' ? (
@@ -78,31 +87,76 @@ function graphView(kit: Kit, model: PaneModel): RenderElement {
       <Text> </Text>
     )
 
-  const heads = graph.rigs.map((rig, column) => (
-    <Box flexDirection="row" key={`head:${rig.name}`}>
-      <Text>{'  '}</Text>
-      <Button
-        key={KEYS.rigOf(rig.name)}
-        plain
-        dimColor={states[column] === 'off'}
-        {...(startKey === KEYS.rigOf(rig.name) ? ({ autoFocus: true } as const) : {})}
-        onPress={() => kit.actions.toggleRig(rig.name)}
-      >
-        {graph.heads[column] ?? rig.name}
-      </Button>
-    </Box>
-  ))
+  const headOf = (rig: Model.Rig, column: number) => (
+    <Button
+      key={KEYS.rigOf(rig.name)}
+      plain
+      dimColor={states[column] === 'off'}
+      {...(startKey === KEYS.rigOf(rig.name) ? ({ autoFocus: true } as const) : {})}
+      onPress={() => kit.actions.toggleRig(rig.name)}
+    >
+      {named(graph.heads[column] ?? rig.name, changes.rigs[column] ?? null)}
+    </Button>
+  )
+
+  const plugin = <Text bold>{Model.pad(graph.margin + 'plugin', graph.width)}</Text>
+
+  /** One row of rig names across, or rows of them staggered, each name starting over its mark. */
+  const headRows = tiered
+    ? Array.from({ length: tiered.tiers }, (_, tier) => {
+        let cursor = 0
+        const parts: RenderElement[] = []
+
+        graph.rigs.forEach((rig, column) => {
+          if (column % tiered.tiers !== tier) {
+            return
+          }
+
+          const at = column * tiered.pitch + 1
+
+          parts.push(<Text key={`gap:${rig.name}`}>{' '.repeat(at - cursor)}</Text>, headOf(rig, column))
+          cursor = at + Model.cells(graph.heads[column] ?? rig.name)
+        })
+
+        return (
+          <Box flexDirection="row" key={`tier:${tier}`}>
+            {tier === tiered.tiers - 1 ? plugin : <Text>{' '.repeat(graph.width)}</Text>}
+            {parts}
+          </Box>
+        )
+      })
+    : [
+        <Box flexDirection="row" key="tier:0">
+          {plugin}
+          {graph.rigs.map((rig, column) => (
+            <Box flexDirection="row" key={`head:${rig.name}`}>
+              <Text>{'  '}</Text>
+              {headOf(rig, column)}
+            </Box>
+          ))}
+        </Box>,
+      ]
+
+  /** Where a column's mark sits: centred under its name across, or a cell in when staggered. */
+  const spotOf = (column: number): { left: number; right: number } => {
+    if (tiered) {
+      return { left: 1, right: tiered.pitch - 2 }
+    }
+
+    const width = Model.cells(graph.heads[column] ?? '')
+    const left = Math.floor((width - 1) / 2) + ((width - 1) & width & 1)
+
+    return { left: 2 + left, right: Math.max(width - left - 1, 0) }
+  }
 
   const marks = graph.rigs.map((rig, column) => {
-    const head = graph.heads[column] ?? rig.name
-    const width = Model.cells(head)
-    const left = Math.floor((width - 1) / 2) + ((width - 1) & width & 1)
+    const { left, right } = spotOf(column)
 
     return (
       <Box flexDirection="row" key={`mark:${rig.name}`}>
-        <Text>{'  ' + ' '.repeat(left)}</Text>
+        <Text>{' '.repeat(left)}</Text>
         {markOf(states[column] ?? 'off')}
-        <Text>{' '.repeat(Math.max(width - left - 1, 0))}</Text>
+        <Text>{' '.repeat(right)}</Text>
       </Box>
     )
   })
@@ -122,13 +176,13 @@ function graphView(kit: Kit, model: PaneModel): RenderElement {
     const key = KEYS.pluginOf(pluginId)
 
     const dots = graph.rigs.map((rig, column) => {
-      const head = graph.heads[column] ?? rig.name
+      const { left, right } = spotOf(column)
       const isIn = rig.plugins.includes(pluginId)
       const isOn = isIn && isLoaded && states[column] !== 'off'
 
       return (
         <Text key={`${pluginId}:${rig.name}`} {...(isOn ? { color: COLORS.add } : { dimColor: true })}>
-          {'  ' + Model.center(isIn ? '●' : '·', head.length)}
+          {' '.repeat(left) + (isIn ? '●' : '·') + ' '.repeat(right)}
         </Text>
       )
     })
@@ -142,10 +196,14 @@ function graphView(kit: Kit, model: PaneModel): RenderElement {
           {...(startKey === key ? ({ autoFocus: true } as const) : {})}
           onPress={() => kit.actions.activate(pluginId)}
         >
-          {Model.pad(graph.labels[index] ?? pluginId, graph.width)}
+          {named(Model.pad(graph.labels[index] ?? pluginId, graph.width), changes.rows[index] ?? null)}
         </Button>
         {dots}
-        {plan.missing.includes(pluginId) ? <Text color={COLORS.warn}>{'  installs at launch'}</Text> : null}
+        {plan.missing.includes(pluginId) ? (
+          <Text color={COLORS.warn} wrap="truncate-end">
+            {'  installs at launch'}
+          </Text>
+        ) : null}
       </Box>
     )
   })
@@ -154,17 +212,16 @@ function graphView(kit: Kit, model: PaneModel): RenderElement {
     <Box flexDirection="column">
       <Text bold>rig switch</Text>
       <Text>{Model.summary(plan)}</Text>
+      {changeLine(kit, graph, changes.rows)}
       <Box height={1} />
-      <Box flexDirection="row">
-        <Text bold>{Model.pad(graph.margin + 'plugin', graph.width)}</Text>
-        {heads}
-      </Box>
+      {headRows}
       <Box flexDirection="row">
         <Text>{' '.repeat(graph.width)}</Text>
         {marks}
-        {legendText}
+        {tiered ? null : legendText}
       </Box>
       {rows}
+      {tiered && legendText.length > 0 ? <Box flexDirection="row">{legendText}</Box> : null}
       <Box height={1} />
       <Box flexDirection="row" gap={2}>
         <Button key={KEYS.SWITCH} plain hotkey="l" onPress={kit.actions.switchRigs}>
@@ -177,6 +234,34 @@ function graphView(kit: Kit, model: PaneModel): RenderElement {
       <Text dimColor wrap="truncate-end">
         {HINT}
       </Text>
+    </Box>
+  )
+}
+
+/** SWITCH-05: the plugins the switch brings in, in green, and takes out, in red; nothing while it changes none. */
+function changeLine(kit: Kit, graph: Model.Graph, rows: readonly Model.Change[]): RenderElement | null {
+  const { Box, Text } = kit.ui
+  const namesOf = (change: Model.Change) =>
+    graph.rows.flatMap((pluginId, index) => (rows[index] === change ? [(graph.labels[index] ?? pluginId).trim()] : []))
+  const added = namesOf('added')
+  const removed = namesOf('removed')
+
+  if (added.length === 0 && removed.length === 0) {
+    return null
+  }
+
+  return (
+    <Box flexDirection="column">
+      {added.length > 0 ? (
+        <Text color={COLORS.add} wrap="truncate-end">
+          {`+ ${added.join(', ')}`}
+        </Text>
+      ) : null}
+      {removed.length > 0 ? (
+        <Text color={COLORS.remove} wrap="truncate-end">
+          {`- ${removed.join(', ')}`}
+        </Text>
+      ) : null}
     </Box>
   )
 }

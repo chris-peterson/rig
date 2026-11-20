@@ -25,6 +25,20 @@ function parseState(text: string): Model.State | null {
   }
 }
 
+/** SWITCH-05: the pane, as tall as the graph inline, and docked only as wide as its rig names on two staggered rows need. */
+function openOf(state: Model.State) {
+  const graph = Model.graphOf(state)
+
+  return {
+    id: PANE_ID,
+    title: 'rig switch',
+    focus: true,
+    closeOnEscape: true,
+    rows: graph.rows.length + 9,
+    columns: Math.max(Model.tiersOf(graph, 2).width + 2, 32),
+  } as const
+}
+
 /** The open pane's model, and the session it switches: one session per process. */
 let pane: PaneModel | null = null
 let sessionId = ''
@@ -183,10 +197,21 @@ async function record($: EngineInterface): Promise<void> {
     return
   }
 
+  const text = result.stdout.trim()
+
   pane = null
   await $.ui.close({ id: PANE_ID }).catch(() => undefined)
-  $.ui.log(result.stdout.trim())
-  exitSoon($)
+  $.ui.log(text)
+
+  // Unchanged picks record nothing, so an exit would end the session with no relaunch.
+  if (!isUnchanged(text)) {
+    exitSoon($)
+  }
+}
+
+/** What `rig switch` says when the picks are what the session already loads: it records nothing. */
+function isUnchanged(text: string): boolean {
+  return text.includes('already uses')
 }
 
 /**
@@ -222,7 +247,7 @@ export function register(on: On): void {
 
       const text = result.stdout.trim()
 
-      if (!text.includes('already uses')) {
+      if (!isUnchanged(text)) {
         exitSoon($)
       }
 
@@ -255,13 +280,7 @@ export function register(on: On): void {
 
     pane = { state, picks, dialog: null, focus: null }
 
-    await $.ui.open({
-      id: PANE_ID,
-      title: 'rig switch',
-      focus: true,
-      closeOnEscape: true,
-      rows: Model.graphOf(state).rows.length + 9,
-    })
+    await $.ui.open(openOf(state))
 
     for (const note of Model.hereNotes(state, picks)) {
       $.ui.toast(note, { timeoutMs: 8000 })
@@ -277,7 +296,7 @@ export function register(on: On): void {
 
     const { Box, Text, Button } = $.ui.resolve(e)
 
-    return paneView({ ui: { Box, Text, Button }, actions: actionsOf($) }, pane)
+    return paneView({ ui: { Box, Text, Button }, actions: actionsOf($), columns: e.props.bodyColumns }, pane)
   })
 
   /** Escape over the pin dialog backs out to the graph; over the graph it cancels the switch. */
@@ -285,7 +304,7 @@ export function register(on: On): void {
     if (pane?.dialog && e.origin.kind === 'person') {
       pane = { ...pane, dialog: null }
       redraw($)
-      void $.ui.open({ id: PANE_ID, title: 'rig switch', focus: true, closeOnEscape: true }).catch(() => undefined)
+      void $.ui.open(openOf(pane.state)).catch(() => undefined)
 
       return { deny: 'back to the graph' }
     }

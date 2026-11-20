@@ -309,7 +309,7 @@ export function hereNotes(state: State, picks: Picks): string[] {
     .map(offer => {
       const what = loads(offer, picks.choices) ? 'its checkout loads' : 'the installed copy loads'
 
-      return `${PIN} ${offer.pin.plugin} holds this folder: ${what}`
+      return `${PIN} ${offer.pin.plugin} holds this folder: ${what}  ✕`
     })
 }
 
@@ -369,7 +369,11 @@ export type Graph = {
   margin: string
 }
 
-/** RIG-14, LAUNCH-07: each rig's plugins together, then the installed plugins no rig names, then pins for none of those. */
+/**
+ * RIG-14, LAUNCH-07: each rig's plugins together, then the installed plugins no
+ * rig names, then pins for none of those. SWITCH-05: a row is named without its
+ * marketplace, unless another row shares the name.
+ */
 export function graphOf(state: State): Graph {
   const rows = unique(state.rigs.flatMap(rig => rig.plugins))
 
@@ -381,16 +385,74 @@ export function graphOf(state: State): Graph {
 
   const pinned = (p: string): boolean => state.pins.some(pin => pin.plugin === nameOf(p))
   const margin = rows.some(pinned) ? ' '.repeat(cells(`${PIN} `)) : ''
-  const labels = rows.map(p => (pinned(p) ? pluginCell(p, state.pins) : margin + p))
+  const shared = (p: string): boolean => rows.some(other => other !== p && nameOf(other) === nameOf(p))
+  const nameIn = (p: string): string => (shared(p) ? p : nameOf(p))
+  const labels = rows.map(p => (pinned(p) ? `${PIN} ${nameIn(p)}` : margin + nameIn(p)))
   const heads = state.rigs.map(rig => (rig.default ? '★' : '') + rig.name)
   const width = Math.max(cells(margin + 'plugin'), ...labels.map(cells))
 
   return { rigs: state.rigs, rows, labels, heads, width, margin }
 }
 
+/** SWITCH-05: the columns the graph takes with each rig's name across its column, two cells apart. */
+export function acrossWidth(graph: Graph): number {
+  return graph.width + graph.heads.reduce((sum, head) => sum + 2 + cells(head), 0)
+}
+
+/**
+ * SWITCH-05: the rig names staggered over `tiers` rows, column i's on row
+ * i mod tiers, each starting over its column's mark. `pitch` is the cells a
+ * column takes: enough that a name clears the next one on its row by a cell.
+ */
+export type Tiers = { tiers: number; pitch: number; width: number }
+
+export function tiersOf(graph: Graph, tiers: number): Tiers {
+  const longest = Math.max(0, ...graph.heads.map(cells))
+  const pitch = Math.max(2, Math.ceil((longest + 1) / tiers))
+  const reach = graph.heads.map((head, column) => column * pitch + 1 + cells(head))
+  const width = graph.width + Math.max(graph.heads.length * pitch, ...reach)
+
+  return { tiers, pitch, width }
+}
+
+/** SWITCH-05: the fewest rows of rig names that fit `columns`, else the narrowest; null when one row across fits. */
+export function stagger(graph: Graph, columns: number): Tiers | null {
+  if (acrossWidth(graph) <= columns) {
+    return null
+  }
+
+  const options = graph.heads.slice(1).map((_, index) => tiersOf(graph, index + 2))
+
+  return options.find(option => option.width <= columns) ?? options.reduce((a, b) => (b.width < a.width ? b : a), tiersOf(graph, 2))
+}
+
 /** Whether row `pluginId` of the graph loads under the plan: a bare pin row loads when its plugin does. */
 export function rowLoads(plan: Plan, pluginId: string): boolean {
   return [...plan.sources.keys()].some(p => p === pluginId || nameOf(p) === pluginId)
+}
+
+/** SWITCH-05: whether a row or rig comes in or goes, against what the session loads now. */
+export type Change = 'added' | 'removed' | null
+
+export function changeOf(before: boolean, now: boolean): Change {
+  return before === now ? null : now ? 'added' : 'removed'
+}
+
+/** SWITCH-05: what the picks change against the session: each row's change, and each rig's by whether its plugins load. */
+export function changesOf(state: State, picks: Picks): { rows: Change[]; rigs: Change[] } {
+  const graph = graphOf(state)
+  const before = planOf(state, initialPicks(state))
+  const now = planOf(state, picks)
+
+  return {
+    rows: graph.rows.map(pluginId => changeOf(rowLoads(before, pluginId), rowLoads(now, pluginId))),
+    rigs: graph.rigs.map(rig => changeOf(rigLoads(rig, before), rigLoads(rig, now))),
+  }
+}
+
+/** A rig loads when it's chosen, or when another rig, such as full, loads every plugin it names. */
+function rigLoads(rig: Rig, plan: Plan): boolean {
+  return rigState(rig, plan) !== 'off' || (rig.plugins.length > 0 && rig.plugins.every(p => rowLoads(plan, p)))
 }
 
 /** LAUNCH-07, LAUNCH-11: ★ when a rig is a default, ✓ when a rig besides base loads, ◐ while a rig loads in part. */
