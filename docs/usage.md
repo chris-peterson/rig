@@ -99,7 +99,9 @@ holds the 🚀's exhaust still. `rig use web --select` starts the picker with
 `web` chosen.
 
 Tab completion offers the rigs after `rig use`, and again after each space or
-comma, leaving out the ones already named.
+comma, leaving out the ones already named. After `--resume` or `-r` it offers
+the sessions you've had in the current folder, newest first, each with its
+`/rename` title or the title Claude Code gave it.
 
 A plugin you enable during a session with `/plugin enable` loads in that
 session; the next launch turns it off again in `~/.claude/settings.json` and

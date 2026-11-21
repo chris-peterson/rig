@@ -2418,10 +2418,73 @@ def cmd_setup(args: list[str]) -> int:
     return 0
 
 
+SESSIONS_OFFERED = 50
+TITLE_SCAN = 256 * 1024
+
+
+def project_folder(cwd: str) -> Path:
+    """TAB-07: where Claude Code keeps the sessions of a working directory: its path with every character but
+    a letter or digit made `-`."""
+    return Path.home() / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", cwd)
+
+
+def session_title(path: Path) -> str:
+    """TAB-07: the session's /rename title, else the title Claude Code gave it, else its first prompt; read from
+    the ends of the transcript, which can run to megabytes."""
+    size = path.stat().st_size
+    with path.open("rb") as f:
+        head = f.read(TITLE_SCAN)
+        f.seek(max(size - TITLE_SCAN, len(head)))
+        tail = f.read()
+    titles: dict[str, str] = {}
+    prompt = ""
+    for line in (head + b"\n" + tail).splitlines():
+        if not line.startswith(b"{") or not any(k in line for k in (b'"custom-title"', b'"ai-title"', b'"user"')):
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        kind = entry.get("type")
+        if kind == "custom-title" and entry.get("customTitle"):
+            titles["custom"] = entry["customTitle"]
+        elif kind == "ai-title" and entry.get("aiTitle"):
+            titles["ai"] = entry["aiTitle"]
+        elif kind == "user" and not prompt and not entry.get("isMeta"):
+            content = (entry.get("message") or {}).get("content")
+            if isinstance(content, list):
+                content = next((c.get("text") for c in content if isinstance(c, dict) and c.get("type") == "text"), "")
+            if isinstance(content, str) and not content.lstrip().startswith("<"):
+                prompt = content
+    title = titles.get("custom") or titles.get("ai") or prompt
+    return " ".join(title.split())[:100]
+
+
+def resumable_sessions(cwd: str | None = None) -> list[tuple[str, str]]:
+    """TAB-07: (session id, title) for the working directory's sessions, newest first."""
+    folders = []
+    for path in filter(None, (cwd or os.environ.get("PWD"), str(Path.cwd().resolve()))):
+        if (folder := project_folder(path)) not in folders:
+            folders.append(folder)
+    files = [f for folder in folders if folder.is_dir() for f in folder.glob("*.jsonl")]
+    files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+    sessions = []
+    for path in files[:SESSIONS_OFFERED]:
+        try:
+            sessions.append((path.stem, session_title(path)))
+        except OSError:
+            continue
+    return sessions
+
+
 def cmd_complete(args: list[str]) -> int:
     """Values for tab completion that the zsh script can't read off disk itself."""
+    if args == ["sessions"]:
+        for session, title in resumable_sessions():
+            print(f"{session}:{title}" if title else session)
+        return 0
     if args != ["pinnable"]:
-        fail("complete takes: pinnable")
+        fail("complete takes: pinnable, sessions")
     pinned = {Path(p["path"]) for p in read_pins()}
     clones = clone_roots()
     try:
@@ -2656,6 +2719,11 @@ _rig_pinnable() {
   (( $#pinnable )) && _describe -t pinnable 'plugin with a local clone' pinnable
 }
 
+_rig_sessions() {
+  local -a sessions=(${(f)"$(command rig complete sessions 2>/dev/null)"})
+  (( $#sessions )) && _describe -V -t sessions 'session to resume' sessions
+}
+
 _rig() {
   local -a commands=(
     'use:Launch Claude Code with the base rig and the named rigs'
@@ -2674,6 +2742,10 @@ _rig() {
   elif (( CURRENT == 2 )) && [[ $service == claude ]] && [[ $PREFIX != -* ]]; then
     local -a prefix=('rig:rig commands')
     _describe -t rig-prefix 'rig' prefix && ret=0
+  fi
+  if [[ $words[CURRENT-1] == (--resume|-r) ]] && [[ $PREFIX != -* ]]; then
+    _rig_sessions
+    return
   fi
   if (( CURRENT == 2 )); then
     if [[ $PREFIX == -* ]]; then

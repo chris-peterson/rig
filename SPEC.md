@@ -521,6 +521,12 @@ pinned plugins.
 When the user completes a flag of a launch, the system shall offer `--sandbox`
 and `--select`.
 
+#### `TAB-07`
+When the user completes the value of `--resume` or `-r` in a launch, the system
+shall offer the Claude Code sessions of the working directory, newest first,
+each described by its `/rename` title, else the title Claude Code gave it, else
+its first prompt.
+
 ### `DOCTOR`
 Doctor
 

@@ -6,7 +6,7 @@ Maintained by `/sextant:spec-status`.
 **Last audit:** 2026-11-21
 **Spec version:** root SPEC.md (unversioned)
 **Plugin version:** unreleased
-**Coverage:** 97 Covered, 0 Partial, 0 Missing/Contradicts
+**Coverage:** 98 Covered, 0 Partial, 0 Missing/Contradicts
 **Evidence pointers:** file
 
 ## Status by category
@@ -21,7 +21,7 @@ Maintained by `/sextant:spec-status`.
 | LAUNCH-01..17 | 17 | All Covered | `scripts/rig` (`launch`, `claude_args`, `confirmation`, `select_app`, `editor_app`, `run_claude`, `run_app`), tests in `tests/test_rig.py`; LAUNCH-05 and LAUNCH-07..13 drive the picker with Textual's pilot, keys and clicks, and through a pty. LAUNCH-05 opens the picker with a Textual notification as its notice, the cursor on the first pin to choose. The picker draws the same `Graph` pieces `rig list --graph` prints. LAUNCH-14 is `cmd_badge`, run by `hooks/beacon-badge.sh` at SessionStart; tests use a stand-in beacon, and a live badge hasn't been tried. LAUNCH-13's click is driven through the handler, since Textual's pilot can't click the bar on a bordered screen's inner edge. LAUNCH-06's Ctrl-C handling is untested. A launch whose arguments carry `--settings` is refused, since a second `--settings` replaces the first (verified 2026-11-10). LAUNCH-15's tests close the picker's pty with SIGHUP ignored and with no controlling terminal; the editor shares `run_app` but isn't driven through a hangup |
 | SWITCH-01..05 | 5 | All Covered | The `/rig` mod (`hooks/switch.ts`, `hooks/switch/model.ts`, `hooks/switch/view.tsx`) over `scripts/rig` (`cmd_switch`, `switch_state`, `launch`, `claude_args`, `take_switch`); tests in `tests/test_rig.py` have a stand-in claude run `rig switch`, with rigs and with `--picks`, and check the relaunch, and `tests/switch.test.ts` drives the mod under `claude plugin test`. The command is `/rig`, not `/rig:switch`: a mod can't register a name with `:` (Claude Code 2.1.329). The mod's exit through `$.command.run` was tried live; the pane hasn't been driven interactively, and its focus-follow scroll is untested. SWITCH-05's narrow layout follows the `Pane`'s `bodyColumns` (`acrossWidth`, `tiersOf`, `stagger`) and asks the dock for `columns`; the staggered rows are checked as text, not as drawn |
 | SHELL-01..06 | 6 | All Covered | `scripts/rig` (`main`, `cmd_install_cli`), `commands/install-rig.md`, `hooks/cli-freshness.sh`; tests run the install against a throwaway HOME |
-| TAB-01..06 | 6 | All Covered | `scripts/rig` (`ZSH_COMPLETION`); tests check parity, zsh syntax, and the awk readers, and run `_rig` in zsh with stand-ins for `compadd` and `_default` for TAB-03 and TAB-06. Live completion inside a real widget (`IPREFIX` after a comma) hasn't been tried |
+| TAB-01..07 | 7 | All Covered | `scripts/rig` (`ZSH_COMPLETION`, `resumable_sessions`, `session_title`); tests check parity, zsh syntax, and the awk readers, and run `_rig` in zsh with stand-ins for `compadd` and `_default` for TAB-03 and TAB-06. Live completion inside a real widget (`IPREFIX` after a comma) hasn't been tried. TAB-07 reads Claude Code's transcripts under `~/.claude/projects/` (an internal layout: the folder slug, and the `custom-title` and `ai-title` lines), only their first and last 256 KB, and offers the 50 newest |
 | DOCTOR-01..05 | 5 | All Covered | `scripts/rig` (`cmd_doctor`, `shell_probe`), tests in `tests/test_rig.py` probe a new zsh in a throwaway HOME. On a live machine (2026-11-10) it caught a `~/.zcompdump` from before `_rig`, read by `compinit -C` |
 
 ## Audit history
@@ -31,7 +31,8 @@ Maintained by `/sextant:spec-status`.
 STATUS.md updated: +2 IDs (EDITOR-15 `r` edits a rig's rules in git's
 editor, LAUNCH-17 escape takes a message away in the picker and the editor;
 both Covered); EDITOR-08 reworded for rules the editor can now change, still
-Covered. Coverage 97 of 97.
+Covered. Coverage 97 of 97. Then +1 ID (TAB-07, `--resume` offers the
+folder's sessions, Covered). Coverage 98 of 98.
 
 ### 2026-11-20: A narrow switch pane
 

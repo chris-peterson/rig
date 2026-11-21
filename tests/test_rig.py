@@ -2437,6 +2437,7 @@ class CompletionParity(unittest.TestCase):
           if [[ $a[-2] == -a ]]; then print -rl -- ${(P)a[-1]}; else print -rl -- ${a[$a[(i)--]+1,-1]}; fi
         }
         _default() { print -r -- _default }
+        _rig_sessions() { print -r -- _rig_sessions }
         words=("$@"); CURRENT=$#; PREFIX=$words[-1]; IPREFIX=; service=rig
         _rig
         print -r -- "IPREFIX=$IPREFIX"
@@ -2470,6 +2471,36 @@ class CompletionParity(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             self.home = home
             self.assertEqual(self.complete("use", "web", "--s"), ["--sandbox", "--select", "IPREFIX="])
+
+    def test_tab_07_resume_offers_sessions(self):
+        with tempfile.TemporaryDirectory() as home:
+            self.home = home
+            self.assertEqual(self.complete("--resume", ""), ["_rig_sessions", "IPREFIX="])
+            self.assertEqual(self.complete("use", "web", "-r", "ab"), ["_rig_sessions", "IPREFIX="])
+            self.assertEqual(self.complete("rig", "--resume", ""), ["_rig_sessions", "IPREFIX="])
+            self.assertEqual(self.complete("use", "web", "--resume", "--s"), ["--sandbox", "--select", "IPREFIX="])
+
+    def test_tab_07_sessions_newest_first_with_their_titles(self):
+        with tempfile.TemporaryDirectory() as home, unittest.mock.patch.dict(os.environ, {"HOME": home}):
+            folder = Path(home) / ".claude" / "projects" / "-src-acme-web"
+            folder.mkdir(parents=True)
+            line = lambda **entry: json.dumps(entry) + "\n"
+            transcripts = {
+                "renamed": line(type="user", message={"content": "fix the build"}) + line(type="ai-title", aiTitle="Build fix")
+                           + line(type="custom-title", customTitle="build-42"),
+                "titled": line(type="user", message={"content": "<command-name>/x</command-name>"})
+                          + line(type="user", message={"content": [{"type": "text", "text": "add a  flag"}]})
+                          + line(type="ai-title", aiTitle="Add a flag"),
+                "untitled": line(type="user", isMeta=True, message={"content": "caveat"})
+                            + line(type="user", message={"content": "why is CI\nred?"}),
+            }
+            for age, (name, text) in enumerate(transcripts.items()):
+                path = folder / f"{name}.jsonl"
+                path.write_text(text)
+                os.utime(path, (1_000_000 - age, 1_000_000 - age))
+            self.assertEqual(self.rig.resumable_sessions("/src/acme/web"),
+                             [("renamed", "build-42"), ("titled", "Add a flag"), ("untitled", "why is CI red?")])
+            self.assertEqual(self.rig.resumable_sessions("/src/elsewhere"), [])
 
     def test_zsh_parses_the_completion(self):
         with tempfile.NamedTemporaryFile("w", suffix=".zsh") as f:

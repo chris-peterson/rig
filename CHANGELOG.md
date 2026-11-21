@@ -6,6 +6,9 @@
   editor, or `$VISUAL`, `$EDITOR`, or `vi` without git. Saving and closing
   makes them unsaved changes, and the rig's box shows them. Rules that don't
   hold are refused with the reason, and the next `r` opens what you wrote.
+- Tab after `claude --resume` or `-r` (and `rig use … --resume`) offers the
+  current folder's sessions, newest first, each with its `/rename` title or the
+  title Claude Code gave it. Run `/rig:install-rig` again to pick it up.
 - Escape in the picker or the rig editor closes the message on show instead of
   cancelling. With no message showing, escape still cancels the picker.
 
