@@ -241,6 +241,36 @@ class Rigs(RigCase):
         self.assertNotIn("p@n", self.launched()[0]["enabledPlugins"])
         self.assertIn('"p@n": true', (project / ".claude" / "settings.json").read_text())
 
+    def project_off(self, name: str = "settings.json") -> Path:
+        """A project whose settings file of that name sets the base rig's b@m to false."""
+        project = self.home / "src" / "proj"
+        path = project / ".claude" / name
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"enabledPlugins": {"b@m": False}}))
+        return project
+
+    def test_rig_04_project_off_keeps_a_rig_plugin_out(self):
+        project = self.project_off()
+        for cwd in (project, project / "sub"):
+            cwd.mkdir(exist_ok=True)
+            result = self.rig("-p", "hi", cwd=cwd)
+            self.assertIn("\nleft off by ~/src/proj/.claude/settings.json: b@m\n", result.stderr)
+        self.assertEqual(self.enabled_sets(), [{"a@m"}] * 2)
+        self.assertNotIn("b@m", self.launched_overlays()[0]["enabledPlugins"])
+
+    def test_rig_04_project_local_off_keeps_a_rig_plugin_out(self):
+        self.rig("-p", "hi", cwd=self.project_off("settings.local.json"))
+        self.assertEqual(self.launched()[0]["enabledPlugins"], {"a@m": True})
+
+    def test_rig_04_user_off_does_not_keep_a_rig_plugin_out(self):
+        self.write_settings(self.home, {"b@m": False})
+        result = self.rig("-p", "hi")
+        self.assertEqual(self.launched()[0]["enabledPlugins"], {"a@m": True, "b@m": True})
+        self.assertNotIn("left off", result.stderr)
+
+    def launched_overlays(self) -> list[dict]:
+        return [json.loads(c[1]) for c in self.claude_calls() if c[:1] == ["--settings"]]
+
     def test_rig_12_user_settings_plugins_turned_off(self):
         path = self.home / ".claude" / "settings.json"
         path.write_text('{\n  "enabledPlugins": {\n    "a@m": true,\n\n    "d@n": true,\n    "e@n": false\n  },\n'
@@ -1175,6 +1205,20 @@ class Pins(RigCase):
         self.assertEqual(status, 0, output)
         self.assertIn("rig: base + x@n - a@m, 2 plugins", output)
         self.assertEqual(self.launched()[0]["enabledPlugins"], {"a@m": False, "b@m": True, "x@n": True})
+
+    def test_rig_04_project_off_yields_to_a_plugin_picked_on_its_own(self):
+        self.write_settings(self.away, {"x@n": False})
+        status, output = self.rig_tty("--select", "--", "hi", keys=["down", "enter", "down", "down", "down", "enter", "l"])
+        self.assertEqual(status, 0, output)
+        self.assertEqual(self.launched()[0]["enabledPlugins"], {"a@m": False, "b@m": True, "x@n": True})
+
+    def test_rig_04_project_off_leaves_a_pin_as_it_is(self):
+        self.write_settings(self.away, {"b@m": False})
+        self.rig("pin", str(self.ckout))
+        self.rig("-p", "hi")
+        overlay, args = self.launched()
+        self.assertEqual(args[:2], ["--plugin-dir", str(self.ckout.resolve())])
+        self.assertEqual(overlay["enabledPlugins"], {"a@m": True, "b@m": False})
 
     def test_launch_07_e_opens_the_editor_then_the_picker_again(self):
         status, output = self.rig_tty("--select", "--", "hi", keys=["space", "e", "q", "l"])

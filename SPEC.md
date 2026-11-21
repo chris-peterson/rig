@@ -54,7 +54,10 @@ system shall load the plugins of all of them.
 #### `RIG-04`
 When a launch uses rigs, the system shall start Claude Code with their
 plugins enabled for that session, setting no other plugin's state apart from
-pins, so a plugin enabled during the session loads.
+pins, so a plugin enabled during the session loads. A rig plugin that a project
+settings file covering the working directory sets to `false` is left to the
+settings files and named on the launch summary, unless the user picked it on
+its own; a `false` in the user's settings file does not keep it out.
 
 #### `RIG-05`
 When the user runs `rig use <rig>...`, the system shall launch Claude Code with

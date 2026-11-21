@@ -404,6 +404,33 @@ def settings_files(cwd: Path) -> list[Path]:
     return list(dict.fromkeys(f for f in files if f.is_file()))
 
 
+def project_off(cwd: Path) -> dict[str, Path]:
+    """RIG-04: each plugin a project settings file covering cwd sets to false, with that file. The nearest file
+    to name a plugin decides it, settings.local.json before settings.json, and the user's settings file is not
+    a project's even when cwd is under the home folder."""
+    user = user_settings_file().resolve()
+    decided: dict[str, tuple[bool, Path]] = {}
+    for folder in (cwd, *cwd.parents):
+        for path in (folder / ".claude" / "settings.local.json", folder / ".claude" / "settings.json"):
+            if not path.is_file() or path.resolve() == user:
+                continue
+            try:
+                enabled = json.loads(path.read_text()).get("enabledPlugins") or {}
+            except json.JSONDecodeError as error:
+                fail(f"{path} is not valid JSON: {error}")
+            for plugin_id, on in enabled.items():
+                decided.setdefault(plugin_id, (on, path))
+    return {plugin_id: path for plugin_id, (on, path) in decided.items() if on is False}
+
+
+def describe_project_off(left_off: dict[str, Path]) -> list[str]:
+    """RIG-04: the rig plugins a project kept out, grouped by the file that did."""
+    by_file: dict[Path, list[str]] = {}
+    for plugin_id, path in left_off.items():
+        by_file.setdefault(path, []).append(plugin_id)
+    return [f"left off by {display(path)}: {', '.join(ids)}" for path, ids in by_file.items()]
+
+
 def installed_plugins() -> dict:
     path = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
     return json.loads(path.read_text()).get("plugins", {}) if path.exists() else {}
@@ -610,8 +637,12 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
     loaded = [pin for pin, load in chosen if load]
     replaced = {pin["plugin"] for pin in loaded}
     enabled = [p for p in plugins if p.split("@")[0] not in replaced]
+    off = project_off(cwd)
+    left_off = {p: off[p] for p in enabled if p in off and current.sources[p] != PICKED}
+    enabled = [p for p in enabled if p not in left_off]
     stray = [f"turned off in {display(user_settings_file())}: {', '.join(turned_off)}"] if turned_off else []
     print(f"rig: {summary(current, ', ')}", *describe_rules(reasons, selected), *describe_pins(chosen, cwd), *stray,
+          *describe_project_off(left_off),
           *auto_mode_server_off(loaded, cwd),
           f"sandbox: {'on' if sandbox_flag else 'off'}", sep="\n", file=sys.stderr)
     plugin_dirs = [arg for pin in loaded for arg in ("--plugin-dir", pin["path"])]

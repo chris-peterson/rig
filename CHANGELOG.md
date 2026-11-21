@@ -11,6 +11,11 @@
   title Claude Code gave it. Run `/rig:install-rig` again to pick it up.
 - Escape in the picker or the rig editor closes the message on show instead of
   cancelling. With no message showing, escape still cancels the picker.
+- A plugin your project turns off (`false` under `enabledPlugins` in its
+  `.claude/settings.json` or `settings.local.json`) stays off when a rig names
+  it, and the launch summary says which file kept it out. A `false` in
+  `~/.claude/settings.json` still gives way to the rig, and a plugin you pick
+  on its own in the picker still loads.
 
 ## 0.3.0
 
