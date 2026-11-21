@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - `r` in `rig setup` opens the selected rig's rules in your editor: git's
   editor, or `$VISUAL`, `$EDITOR`, or `vi` without git. Saving and closing
