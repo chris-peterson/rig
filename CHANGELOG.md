@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - The `/rig` pane fits a sidebar: it names plugins without their marketplace
   (unless two share a name), staggers the rig names over two or more rows
