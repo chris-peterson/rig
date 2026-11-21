@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `r` in `rig setup` opens the selected rig's rules in your editor: git's
+  editor, or `$VISUAL`, `$EDITOR`, or `vi` without git. Saving and closing
+  makes them unsaved changes, and the rig's box shows them. Rules that don't
+  hold are refused with the reason, and the next `r` opens what you wrote.
+- Escape in the picker or the rig editor closes the message on show instead of
+  cancelling. With no message showing, escape still cancels the picker.
+
 ## 0.3.0
 
 - The `/rig` pane fits a sidebar: it names plugins without their marketplace

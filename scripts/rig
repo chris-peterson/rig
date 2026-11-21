@@ -188,19 +188,32 @@ def check_rules(name: str, rig: dict, path: Path) -> None:
     if rules is None:
         rig.pop("rules", None)
         return
+    if problem := rule_problem(name, rules, f" in {path}"):
+        fail(problem)
+
+
+def rule_problem(name: str, rules, where: str = "") -> str | None:
+    """RIG-11, EDITOR-15: what's wrong with a rig's rules, or None when they hold; `where` names the file."""
     if name == BASE:
-        fail(f"rig {BASE} in {path} has rules, but every launch loads {BASE}. Put the rules on another rig.")
+        return f"rig {BASE}{where} has rules, but every launch loads {BASE}. Put the rules on another rig."
     if not isinstance(rules, list):
-        fail(f"rig {name} in {path}: rules should be a list, each rule giving path, exists, or both.")
+        return f"rig {name}{where}: rules should be a list, each rule giving path, exists, or both."
     for rule in rules:
         if not isinstance(rule, dict) or not rule or set(rule) - set(RULE_CONDITIONS):
-            fail(f"rig {name} in {path}: a rule gives path, exists, or both, and nothing else: {rule}")
+            return f"rig {name}{where}: a rule gives path, exists, or both, and nothing else: {rule}"
         if "path" in rule and not (isinstance(rule["path"], str) and rule["path"]):
-            fail(f"rig {name} in {path}: a rule's path should be one pattern: {rule}")
+            return f"rig {name}{where}: a rule's path should be one pattern: {rule}"
         exists = rule.get("exists", [])
         exists = [exists] if isinstance(exists, str) else exists
         if "exists" in rule and not (isinstance(exists, list) and exists and all(isinstance(g, str) and g for g in exists)):
-            fail(f"rig {name} in {path}: a rule's exists should be a glob or a list of them: {rule}")
+            return f"rig {name}{where}: a rule's exists should be a glob or a list of them: {rule}"
+    return None
+
+
+def describe_rule(rule: dict) -> str:
+    """EDITOR-15: a rule on one line, `path ~/src/web/, exists package.json`."""
+    exists = [rule["exists"]] if isinstance(rule.get("exists"), str) else rule.get("exists", [])
+    return ", ".join([f"path {rule['path']}"] * ("path" in rule) + ([f"exists {' '.join(exists)}"] if exists else []))
 
 
 def glob_pattern(glob: str) -> str:
@@ -1450,7 +1463,7 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
         LAYOUT = layout
         ENABLE_COMMAND_PALETTE = False
         BINDINGS = [Binding("l", "launch", "Launch", show=False), Binding("shift+enter", "launch", show=False),
-                    Binding("q", "cancel", "Cancel"), Binding("escape", "cancel", show=False)]
+                    Binding("q", "cancel", "Cancel"), Binding("escape", "escape", show=False)]
         CSS = f"""
         Screen.picker {{ border: round $border; border-title-align: center; border-title-color: $text; }}
         #summary, #sandbox {{ padding: 0 1; }}
@@ -1606,6 +1619,13 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
         def action_cancel(self) -> None:
             self.exit(None)
 
+        def action_escape(self) -> None:
+            """LAUNCH-17: escape takes away a message on show, and cancels when there is none."""
+            if self._notifications:
+                self.clear_notifications()
+            else:
+                self.action_cancel()
+
     return RigPicker()
 
 
@@ -1736,6 +1756,7 @@ class RigEdits:
         self.candidates = sorted(set(installed) | set(enabled) | named, key=plugin_order)
         self.dirty = self.first_run
         self.pinned = set(pinned)
+        self.rule_drafts: dict[str, str] = {}
 
     def order(self) -> list[str]:
         """EDITOR-01: the base rig, the other rigs in alphabetical order, then full."""
@@ -1807,6 +1828,7 @@ class RigEdits:
         self.check_name(new)
         self.rigs = {(new if rig == name else rig): plugins for rig, plugins in self.rigs.items()}
         self.rules = {(new if rig == name else rig): rules for rig, rules in self.rules.items()}
+        self.rule_drafts = {(new if rig == name else rig): text for rig, text in self.rule_drafts.items()}
         self.default = [new if rig == name else rig for rig in self.default]
         self.dirty = True
 
@@ -1840,11 +1862,53 @@ class RigEdits:
             self.default.append(name)
         self.dirty = True
 
+    def rules_text(self, name: str) -> str:
+        """EDITOR-15: the rig's rules as YAML for an editor, under a comment on how they match; or what the user
+        wrote the last time, when it didn't hold."""
+        if name in BUILT_IN:
+            raise Refused(f"{name} loads in every launch, so it takes no rules." if name == BASE
+                          else f"{FULL} is every installed plugin; give rules to the rigs it holds.")
+        if name in self.rule_drafts:
+            return self.rule_drafts[name]
+        rules = self.rules.get(name)
+        body = yaml_module().safe_dump(rules, sort_keys=False, default_flow_style=False) if rules else "[]\n"
+        return (f"# Rules for {name}: a plain launch adds {name} in a folder where any rule matches, and a rule\n"
+                "# matches when each condition it gives does.\n"
+                "#\n"
+                "# - path: ~/src/web/          the working directory, as git's includeIf \"gitdir/i:\" matches\n"
+                "#   exists: [package.json]    a file in the repo, as GitLab CI's rules:exists matches\n"
+                "#\n"
+                "# Save and close to keep them; [] takes them all out.\n"
+                f"{body}")
+
+    def set_rules(self, name: str, text: str) -> None:
+        """EDITOR-15: take the rules the user wrote, or keep the ones there were and say why."""
+        yaml = yaml_module()
+        try:
+            rules = yaml.safe_load(text)
+        except yaml.YAMLError as error:
+            self.rule_drafts[name] = text
+            raise Refused(f"The rules for {name} aren't valid YAML, so they're as they were; r opens what you "
+                          f"wrote. {error}") from None
+        rules = rules or None
+        if rules is not None and (problem := rule_problem(name, rules)):
+            self.rule_drafts[name] = text
+            raise Refused(f"{problem} The rules are as they were; r opens what you wrote.")
+        self.rule_drafts.pop(name, None)
+        if rules == self.rules.get(name):
+            return
+        if rules:
+            self.rules[name] = rules
+        else:
+            self.rules.pop(name, None)
+        self.dirty = True
+
     def delete(self, name: str) -> None:
         """EDITOR-07."""
         self.fixed(name, "deleted")
         del self.rigs[name]
         self.rules.pop(name, None)
+        self.rule_drafts.pop(name, None)
         if name in self.default:
             self.default.remove(name)
         self.dirty = True
@@ -1858,6 +1922,31 @@ class RigEdits:
         save_config({"default": [name for name in self.order() if name in self.default], "clones": self.clones,
                      "rigs": rigs, "dismissed": sorted(self.dismissed, key=plugin_order)})
         self.dirty = False
+
+
+def text_editor() -> str:
+    """EDITOR-15: git's editor when git is reachable (GIT_EDITOR, core.editor, VISUAL, EDITOR, then git's
+    default); otherwise VISUAL, then EDITOR, then vi."""
+    try:
+        result = subprocess.run(["git", "var", "GIT_EDITOR"], capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except OSError:
+        pass
+    return os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+
+
+def edit_text(text: str, name: str) -> str:
+    """EDITOR-15: the text after the user edits it, running the editor through the shell as git does."""
+    import tempfile
+    editor = text_editor()
+    with tempfile.TemporaryDirectory(prefix="rig-") as folder:
+        path = Path(folder) / f"{name}.rules.yml"
+        path.write_text(text)
+        result = subprocess.run(["sh", "-c", f'{editor} "$@"', editor, str(path)])
+        if result.returncode != 0:
+            raise Refused(f"{editor} exited with {result.returncode}, so the rules for {name} are as they were.")
+        return path.read_text()
 
 
 def open_edits() -> RigEdits:
@@ -1982,9 +2071,11 @@ def editor_app(edits: RigEdits):
             Binding("d", "make_default", "Default"),
             Binding("greater_than_sign", "move_down", "Pull"),
             Binding("less_than_sign", "move_up", "Push"),
+            Binding("r", "rules", "Rules"),
             Binding("x", "delete", "Delete"),
             Binding("s", "save", "Save"),
             Binding("q", "leave", "Quit"),
+            Binding("escape", "clear_message", show=False),
         ]
 
         def __init__(self):
@@ -2097,8 +2188,9 @@ def editor_app(edits: RigEdits):
                 base_box.add_options([Selection(plugin_cell(p, edits.pinned), p, True) for p in edits.candidates if p in edits.rigs[BASE]])
                 if base_box.option_count:
                     base_box.highlighted = 0
-                listing.border_title = key
-                listing.border_subtitle = f"space toggles  < moves a plugin onto {BASE}"
+                rules = edits.rules.get(key)
+                listing.border_title = f"{key}  default where {' or '.join(map(describe_rule, rules))}" if rules else key
+                listing.border_subtitle = f"space toggles  < moves a plugin onto {BASE}  r edits rules"
                 options = [Selection(plugin_cell(p, edits.pinned), p, p in edits.rigs[key]) for p in edits.candidates if p not in edits.rigs[BASE]]
             listing.add_options(options)
             for box in (base_box, listing):
@@ -2213,6 +2305,31 @@ def editor_app(edits: RigEdits):
         def action_make_default(self) -> None:
             if (name := self.selected_rig()) is not None:
                 self.attempt(lambda: edits.make_default(name))
+
+        def action_rules(self) -> None:
+            """EDITOR-15: open the selected rig's rules in the user's editor, taking what they save."""
+            from textual.app import SuspendNotSupported
+            if (name := self.selected_rig()) is None:
+                return
+            try:
+                text = edits.rules_text(name)
+            except Refused as refused:
+                self.say(str(refused), severity="error")
+                return
+            try:
+                try:
+                    with self.app.suspend():
+                        edited = edit_text(text, name)
+                except SuspendNotSupported:
+                    edited = edit_text(text, name)
+            except Refused as refused:
+                self.say(str(refused), severity="error")
+                return
+            self.attempt(lambda: edits.set_rules(name, edited))
+
+        def action_clear_message(self) -> None:
+            """LAUNCH-17: escape takes away the message on show."""
+            self.app.clear_notifications()
 
         def action_delete(self) -> None:
             """EDITOR-07, EDITOR-14: delete the selected rig, or dismiss the selected draft."""

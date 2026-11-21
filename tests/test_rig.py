@@ -18,6 +18,7 @@ import termios
 import textwrap
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 KEYS = {"space": b" ", "tab": b"\t", "enter": b"\r", "escape": b"\x1b", "down": b"\x1b[B", "s": b"s", "q": b"q", "d": b"d", "e": b"e", "x": b"x", "l": b"l"}
@@ -1521,6 +1522,57 @@ class Edits(unittest.TestCase):
         self.assertEqual(saved["rigs"]["front"], {"plugins": ["a@m"], "rules": rules})
         self.assertEqual(saved["rigs"]["api"], {})
 
+    def test_editor_15_rules_round_trip_through_text(self):
+        import yaml
+        edits = self.rig.RigEdits(three_rigs(), [], [], [])
+        text = edits.rules_text("web")
+        self.assertEqual(yaml.safe_load(text), [])
+        self.assertTrue(text.startswith("# Rules for web:"))
+        edits.dirty = False
+        edits.set_rules("web", text.replace("[]\n", "- path: ~/src/web/\n  exists: package.json\n"))
+        self.assertTrue(edits.dirty)
+        self.assertEqual(edits.rules["web"], [{"path": "~/src/web/", "exists": "package.json"}])
+        self.assertEqual(yaml.safe_load(edits.rules_text("web")), edits.rules["web"])
+        edits.set_rules("web", "[]")
+        self.assertNotIn("web", edits.rules)
+
+    def test_editor_15_unchanged_rules_leave_the_edits_clean(self):
+        config = three_rigs()
+        config["rigs"]["web"]["rules"] = [{"path": "~/src/web/"}]
+        edits = self.rig.RigEdits(config, [], [], [])
+        edits.set_rules("web", edits.rules_text("web"))
+        self.assertFalse(edits.dirty)
+
+    def test_editor_15_rules_that_dont_hold_are_kept_for_the_next_edit(self):
+        config = three_rigs()
+        config["rigs"]["web"]["rules"] = [{"path": "~/src/web/"}]
+        edits = self.rig.RigEdits(config, [], [], [])
+        for wrong in ("- path: [unclosed\n", "- branch: main\n", "path: ~/src/\n"):
+            with self.assertRaises(self.rig.Refused):
+                edits.set_rules("web", wrong)
+            self.assertEqual(edits.rules["web"], [{"path": "~/src/web/"}])
+            self.assertEqual(edits.rules_text("web"), wrong)
+        self.assertFalse(edits.dirty)
+        edits.rename("web", "front")
+        self.assertEqual(edits.rules_text("front"), "path: ~/src/\n")
+
+    def test_editor_15_base_and_full_take_no_rules(self):
+        edits = self.rig.RigEdits(three_rigs(), [], [], [])
+        for name in ("base", "full"):
+            with self.assertRaises(self.rig.Refused):
+                edits.rules_text(name)
+
+    def test_editor_15_git_editor_first_then_visual_editor_vi(self):
+        env = {k: v for k, v in os.environ.items() if k not in ("GIT_EDITOR", "VISUAL", "EDITOR")}
+        with unittest.mock.patch.dict(os.environ, {**env, "GIT_EDITOR": "from-git"}, clear=True):
+            self.assertEqual(self.rig.text_editor(), "from-git")
+        with unittest.mock.patch.dict(os.environ, {**env, "PATH": "/nonexistent", "EDITOR": "ed"}, clear=True):
+            self.assertEqual(self.rig.text_editor(), "ed")
+        with unittest.mock.patch.dict(os.environ, {**env, "PATH": "/nonexistent", "VISUAL": "vis", "EDITOR": "ed"}, clear=True):
+            self.assertEqual(self.rig.text_editor(), "vis")
+        with unittest.mock.patch.dict(os.environ, {**env, "PATH": "/nonexistent"}, clear=True):
+            self.assertEqual(self.rig.text_editor(), "vi")
+
     def test_editor_08_saved_in_alphabetical_order(self):
         config = {"default": ["web", "api"], "clones": {}, "rigs": {
             "web": {"plugins": ["z@m", "a@m"]}, "base": {"plugins": ["b@m"]}, "api": {"plugins": []}}}
@@ -1722,6 +1774,50 @@ class Editor(unittest.IsolatedAsyncioTestCase):
             await pilot.press("x", "f2", "x")
             await pilot.pause()
             self.assertEqual(len(app._notifications), 1)
+
+    async def test_launch_17_escape_takes_a_message_away_in_the_editor(self):
+        app, running = self.running(self.existing())
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("x")
+            await pilot.pause()
+            self.assertEqual(len(app._notifications), 1)
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertEqual(len(app._notifications), 0)
+            self.assertEqual(type(app.screen).__name__, "Editor")
+
+    def stand_in_editor(self, written: str) -> str:
+        """A GIT_EDITOR that writes `written` over the file it's given."""
+        script = Path(self._tmp.name) / "editor.sh"
+        script.write_text(f"#!/bin/sh\nprintf -- '{written}' > \"$1\"\n")
+        script.chmod(0o755)
+        return str(script)
+
+    async def test_editor_15_r_edits_the_rules_and_names_them(self):
+        app, running = self.running(self.existing())
+        editor = self.stand_in_editor("- path: ~/src/web/\n")
+        with unittest.mock.patch.dict(os.environ, {"GIT_EDITOR": editor}):
+            async with running as pilot:
+                await pilot.pause()
+                await pilot.press("down", "down", "r")
+                await pilot.pause()
+                self.assertEqual(app.screen.query_one("#plugins").border_title, "web  default where path ~/src/web/")
+                await pilot.press("s")
+                await pilot.pause()
+        self.assertEqual(self.saved()["rigs"]["web"]["rules"], [{"path": "~/src/web/"}])
+
+    async def test_editor_15_rules_that_dont_hold_say_why(self):
+        app, running = self.running(self.existing())
+        editor = self.stand_in_editor("- branch: main\n")
+        with unittest.mock.patch.dict(os.environ, {"GIT_EDITOR": editor}):
+            async with running as pilot:
+                await pilot.pause()
+                await pilot.press("down", "down", "r")
+                await pilot.pause()
+                [message] = [n.message for n in app._notifications]
+                self.assertIn("nothing else", message)
+                self.assertEqual(app.screen.query_one("#plugins").border_title, "web")
 
     async def test_editor_06_shows_what_a_plain_launch_loads(self):
         app, running = self.running(self.existing())
@@ -1979,6 +2075,18 @@ class Picker(unittest.IsolatedAsyncioTestCase):
         async with running as pilot:
             await pilot.pause()
             await pilot.press("q")
+        self.assertIsNone(app.return_value)
+
+    async def test_launch_17_escape_takes_the_message_away_then_cancels(self):
+        app, running = self.running(confirm=True)
+        async with running as pilot:
+            await pilot.pause()
+            self.assertEqual(len(app._notifications), 1)
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertEqual(len(app._notifications), 0)
+            self.assertTrue(app.is_running)
+            await pilot.press("escape")
         self.assertIsNone(app.return_value)
 
     def test_launch_05_nothing_left_open_says_nothing_but_the_keys(self):

@@ -213,7 +213,7 @@ refuse, saying why.
 #### `EDITOR-08`
 When the user saves, the system shall write the rigs to the rig definitions
 file, the base rig first and the rest in alphabetical order, each with its
-plugins in alphabetical order and its rules as they were.
+plugins in alphabetical order and its rules in the order they're written.
 
 #### `EDITOR-09`
 If the user quits the rig editor with unsaved changes, then the system shall
@@ -241,6 +241,14 @@ it out of the selected rig.
 #### `EDITOR-14`
 When the user presses `x` on a draft, the system shall dismiss it, and stop
 offering its plugins as a draft once the rigs are saved.
+
+#### `EDITOR-15`
+When the user presses `r` on a rig other than the base rig and `full`, the
+system shall open the rig's rules as YAML in git's editor, or where git isn't
+on PATH in `$VISUAL`, then `$EDITOR`, then `vi`, and once the editor closes,
+take the rules it saved as an unsaved change and name them in the rig's box;
+if they don't parse or aren't rules, keep the rules as they were, say why, and
+open what the user wrote on the next `r`.
 
 ### `PIN`
 Local pins
@@ -410,6 +418,11 @@ started with SIGHUP ignored.
 If a launch's arguments carry, before any `--`, an option that neither rig nor
 Claude Code's `--help` lists, then the system shall refuse the launch before
 the picker opens, naming the option.
+
+#### `LAUNCH-17`
+While the picker or the rig editor shows a message, the system shall take the
+message away on escape, leaving the picker or editor open; with no message on
+show, escape refuses the picker's launch.
 
 ### `SWITCH`
 Switching rigs mid-session

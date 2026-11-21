@@ -93,7 +93,8 @@ load the checkout or skip it for the installed copy. Escape or the ✕ closes it
 
 `e` opens the rig editor and brings you back to the picker when you quit it.
 `l`, Shift+Enter, or a click on the 🚀 at
-the right end of the footer launches; `q` cancels. `TEXTUAL_ANIMATIONS=none`
+the right end of the footer launches; `q` cancels. Escape cancels too, unless a
+message is showing: then the first escape just closes the message. `TEXTUAL_ANIMATIONS=none`
 holds the 🚀's exhaust still. `rig use web --select` starts the picker with
 `web` chosen.
 
@@ -134,9 +135,11 @@ is a draft.
 | `d` | add the selected rig to the defaults, or take it out |
 | `>` | put the highlighted plugin in the selected rig, taking it off `base` |
 | `<` | put the highlighted plugin on `base`, taking it out of the selected rig |
+| `r` | edit the selected rig's [rules](#default-rigs-by-folder) in your editor |
 | `x` | delete the selected rig, or dismiss the selected draft for good; `base` and `full` stay |
 | `s` | save to `~/.rig/rigs.yml`; on a draft, name it and save it as a rig |
 | `q` | quit; with unsaved changes, asks first: `q` saves and quits, `d` discards, `escape` goes back |
+| `escape` | close the message on show |
 
 A rig names plugins as `<plugin>@<marketplace>`. When a rig names one that
 isn't installed, the picker opens first (below) and marks it, and launching
@@ -194,8 +197,14 @@ by rule: work (path ~/src/acme/), infra (exists **/*.tf)
 
 Naming rigs (`rig use web`) skips the rules. `rig list` shows which rigs are
 defaults in the current folder and why, `rig list --graph` and the `--select`
-picker star them, and the rig editor keeps the rules as they are when it saves.
-Edit rules in `~/.rig/rigs.yml`.
+picker star them.
+
+To edit a rig's rules, select it in `rig setup` and press `r`. Its rules open as
+YAML in git's editor (`git var GIT_EDITOR`), or, without git, in `$VISUAL`,
+`$EDITOR`, or `vi`. When you save and close, they become unsaved changes, and
+the rig's box shows them; `s` writes them to `~/.rig/rigs.yml`. If what you wrote
+isn't valid, the editor says why and keeps the old rules, and the next `r` opens
+what you wrote so you can fix it.
 
 ## Pins
 
