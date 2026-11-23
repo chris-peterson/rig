@@ -213,7 +213,7 @@ def rule_problem(name: str, rules, where: str = "") -> str | None:
 def describe_rule(rule: dict) -> str:
     """EDITOR-15: a rule on one line, `path ~/src/web/, exists package.json`."""
     exists = [rule["exists"]] if isinstance(rule.get("exists"), str) else rule.get("exists", [])
-    return ", ".join([f"path {rule['path']}"] * ("path" in rule) + ([f"exists {' '.join(exists)}"] if exists else []))
+    return ", ".join(([f"path {rule['path']}"] if "path" in rule else []) + ([f"exists {' '.join(exists)}"] if exists else []))
 
 
 def glob_pattern(glob: str) -> str:

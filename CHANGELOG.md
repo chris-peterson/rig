@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `rig setup` no longer crashes when the cursor reaches a rig whose rules name
+  only files (`exists:`) and no `path:`. It crashed while titling the rig's
+  plugin list.
+
 ## 0.4.0
 
 - `r` in `rig setup` opens the selected rig's rules in your editor: git's

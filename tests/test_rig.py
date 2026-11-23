@@ -1600,6 +1600,13 @@ class Edits(unittest.TestCase):
         edits.rename("web", "front")
         self.assertEqual(edits.rules_text("front"), "path: ~/src/\n")
 
+    def test_editor_15_describes_each_shape_of_rule(self):
+        describe = self.rig.describe_rule
+        self.assertEqual(describe({"exists": ["a.json", "b.json"]}), "exists a.json b.json")
+        self.assertEqual(describe({"exists": "a.json"}), "exists a.json")
+        self.assertEqual(describe({"path": "~/src/web/"}), "path ~/src/web/")
+        self.assertEqual(describe({"path": "~/src/web/", "exists": "a.json"}), "path ~/src/web/, exists a.json")
+
     def test_editor_15_base_and_full_take_no_rules(self):
         edits = self.rig.RigEdits(three_rigs(), [], [], [])
         for name in ("base", "full"):
