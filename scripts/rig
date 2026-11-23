@@ -51,12 +51,13 @@ def version_display() -> str:
     return f"{version}-dev.g{sha}{dirty}"
 
 
-_CLAUDE_HELP: list[tuple[set[str], set[str]]] = []
+FLAG, VALUE, OPTIONAL, VALUES = "flag", "<value>", "[value]", "<values...>"  # what an option takes after it
+_CLAUDE_HELP: list[tuple[set[str], dict[str, str]]] = []
 
 
-def claude_help() -> tuple[set[str], set[str]]:
+def claude_help() -> tuple[set[str], dict[str, str]]:
     """The subcommand names `claude --help` lists, aliases included (`plugin|plugins`), and its options, short
-    and long (`-p`, `--print`); read once a run."""
+    and long (`-p`, `--print`), each with what it takes after it; read once a run."""
     if _CLAUDE_HELP:
         return _CLAUDE_HELP[0]
     try:
@@ -65,7 +66,7 @@ def claude_help() -> tuple[set[str], set[str]]:
         fail("claude is not on PATH.")
     if result.returncode != 0:
         fail(f"`claude --help` failed ({result.returncode}): {result.stderr.strip()}")
-    names, options, section = set(), set(), None
+    names, options, section = set(), {}, None
     for line in result.stdout.splitlines():
         if line.startswith(("Commands:", "Options:")):
             section = line.split(":")[0]
@@ -73,7 +74,9 @@ def claude_help() -> tuple[set[str], set[str]]:
         if section == "Commands" and (match := re.match(r"^  ([a-z][a-z|-]*)(?: |$)", line)):
             names.update(match.group(1).split("|"))
         elif section == "Options" and (match := re.match(r"^  (-\S.*?)(?:  |$)", line)):
-            options.update(re.findall(r"(?<![\w-])(--?[A-Za-z][\w-]*)", match.group(1)))
+            value = re.search(r"([<\[])[^>\]]*?(\.\.\.)?[>\]]", match.group(1))
+            takes = FLAG if not value else VALUES if value.group(2) else VALUE if value.group(1) == "<" else OPTIONAL
+            options.update(dict.fromkeys(re.findall(r"(?<![\w-])(--?[A-Za-z][\w-]*)", match.group(1)), takes))
     _CLAUDE_HELP.append((names, options))
     return names, options
 
@@ -90,7 +93,7 @@ def refuse_unknown_options(args: list[str]) -> None:
         return
     end = args.index("--") if "--" in args else len(args)
     unknown = [arg for arg in args[:end] if arg.startswith("-") and arg != "-"
-               and arg.split("=")[0] not in known | {"--sandbox", "--select"}]
+               and arg.split("=")[0] not in {*known, "--sandbox", "--select"}]
     if unknown:
         hint = " For the graph: rig list --graph." if "--graph" in unknown else ""
         fail(f"unknown option {', '.join(unknown)}; neither rig nor Claude Code takes it. See rig --help.{hint}")
@@ -379,8 +382,9 @@ def plan(selected: list[str], rigs: dict, installed: set[str], pins: list[dict],
     added = [p for p in dict.fromkeys(added) if p not in sources and p not in removed]
     sources.update({plugin_id: PICKED for plugin_id in added})
     in_rig = {plugin_id.split("@")[0] for plugin_id in sources}
+    copies = in_rig | {plugin_id.split("@")[0] for plugin_id in installed}
     offered = [PinOffer(pin, pin["plugin"] in in_rig, cwd.resolve().is_relative_to(Path(pin["path"]).resolve()),
-                        pinned_here(pin, cwd)) for pin in pins]
+                        pinned_here(pin, cwd), pin["plugin"] not in copies) for pin in pins]
     return Plan(selected, sources, [p for p in sources if p not in installed], offered, added, removed)
 
 
@@ -518,7 +522,7 @@ def ensure_config(args: list[str]) -> dict:
 
 
 def launch(selected: list[str] | None, args: list[str]) -> None:
-    """RIG-06, LAUNCH-06, SANDBOX-01: launch the base rig with the named rigs, or with the default ones; at a
+    """RIG-06, LAUNCH-06, SANDBOX-01, SWITCH-06: launch the base rig with the named rigs, or the default ones; at a
     terminal, stay Claude Code's parent so a switch can relaunch the conversation with other rigs."""
     refuse_unknown_options(args)
     sandbox_flag, args = take_flag(args, "--sandbox")
@@ -546,12 +550,42 @@ def launch(selected: list[str] | None, args: list[str]) -> None:
             switch = take_switch(request)
             if switch is None:
                 raise SystemExit(status)
-            selected, args = switch["rigs"], ["--resume", switch["session"], switched_prompt(switch["rigs"])]
+            selected = switch["rigs"]
+            args = [*carried_args(args), "--resume", switch["session"], switched_prompt(selected)]
             picks = switch if "pins" in switch else None
             print(f"{PROG}: switching to {label(selected, *picked(picks))}, resuming this conversation",
                   file=sys.stderr)
     finally:
         request.unlink(missing_ok=True)
+
+
+# The options that pick or start a conversation, which a switch's --resume replaces; -w makes the worktree the
+# first launch already made, and -p never reaches a switch, since a switch needs a terminal.
+FIRST_LAUNCH_ONLY = {"-c", "--continue", "-r", "--resume", "--session-id", "--fork-session", "--from-pr",
+                     "--teleport", "-w", "--worktree", "-p", "--print"}
+
+
+def carried_args(args: list[str]) -> list[str]:
+    """SWITCH-06: the arguments a switch's relaunch keeps from the launch before it: each option passed through
+    to Claude Code with its values, read as `claude --help` says it takes them, less the ones that pick or start
+    a conversation. The prompt, and anything after `--`, stays behind."""
+    takes = claude_help()[1]
+    end = args.index("--") if "--" in args else len(args)
+    kept, index = [], 0
+    while index < end:
+        arg, index = args[index], index + 1
+        if not arg.startswith("-") or arg == "-":
+            continue
+        option = arg.split("=", 1)[0]
+        values = []
+        if "=" not in arg and takes.get(option) == VALUE and index < end:
+            values, index = [args[index]], index + 1
+        elif "=" not in arg and takes.get(option) in (OPTIONAL, VALUES):
+            while index < end and not args[index].startswith("-") and (takes[option] == VALUES or not values):
+                values, index = [*values, args[index]], index + 1
+        if option not in FIRST_LAUNCH_ONLY:
+            kept += [arg, *values]
+    return kept
 
 
 def picked(picks: dict | None) -> tuple[list[str], list[str]]:
@@ -564,7 +598,7 @@ def confirmation(current: Plan, rows: list[str]) -> tuple[str, str | None]:
     that install, and the row to put the cursor on: the first pin, else the first plugin to install."""
     lines, rows_named = [], []
     for offer in current.offered:
-        if offer.locked:
+        if offer.settled:
             continue
         name = offer.pin["plugin"]
         if offer.live and offer.selected:
@@ -582,8 +616,8 @@ def confirmation(current: Plan, rows: list[str]) -> tuple[str, str | None]:
 
 def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select: bool = False, reasons: dict = {},
                 picks: dict | None = None) -> tuple[list[str], list[str], dict]:
-    """RIG-04, RIG-08, RIG-09, RIG-12, PIN-10, LAUNCH-01..02, LAUNCH-05, LAUNCH-07, SWITCH-02: the rigs the launch
-    uses, the arguments that start Claude Code with them once their plugins are installed and the pins chosen,
+    """RIG-04, RIG-08, RIG-09, RIG-12, PIN-10, PIN-15, LAUNCH-01..02, LAUNCH-05, LAUNCH-07, SWITCH-02: the rigs
+    the launch uses, the arguments that start Claude Code with them once their plugins are installed and the pins chosen,
     and what was picked beyond the rigs. The reasons are the rules that made rigs defaults, for the ones still
     chosen; the picks are a switch's, chosen in the session, so the launch doesn't ask again."""
     config = load_config()
@@ -604,8 +638,8 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
         if current.missing:
             fail(f"{label(selected)} names plugins that aren't installed: {', '.join(current.missing)}. "
                  "Install them with `claude plugin install <plugin>`, or launch at a terminal to be asked.")
-        chosen = [(offer.pin, offer.in_rig) for offer in current.offered]
-    elif select or current.missing or any(not offer.locked for offer in current.offered):
+        chosen = [(offer.pin, offer.unasked) for offer in current.offered]
+    elif select or current.missing or any(not offer.settled for offer in current.offered):
         plan_for = lambda names, *more: plan(names, rigs, installed, pins, cwd, *more)
         notice, focus = "", None
         while True:
@@ -630,7 +664,7 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
         selected, chosen, *more = answer
         current = plan(selected, rigs, installed, pins, cwd, *more)
     else:
-        chosen = [(offer.pin, True) for offer in current.offered]
+        chosen = [(offer.pin, offer.selected) for offer in current.offered]
     plugins = list(current.sources)
     install(current.missing)
     turned_off = [p for p in turn_off_user_plugins() if p not in plugins]
@@ -641,7 +675,8 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
     left_off = {p: off[p] for p in enabled if p in off and current.sources[p] != PICKED}
     enabled = [p for p in enabled if p not in left_off]
     stray = [f"turned off in {display(user_settings_file())}: {', '.join(turned_off)}"] if turned_off else []
-    print(f"rig: {summary(current, ', ')}", *describe_rules(reasons, selected), *describe_pins(chosen, cwd), *stray,
+    alone = {offer.pin["path"] for offer in current.offered if offer.alone}
+    print(f"rig: {summary(current, ', ')}", *describe_rules(reasons, selected), *describe_pins(chosen, cwd, alone), *stray,
           *describe_project_off(left_off),
           *auto_mode_server_off(loaded, cwd),
           f"sandbox: {'on' if sandbox_flag else 'off'}", sep="\n", file=sys.stderr)
@@ -1206,17 +1241,30 @@ class PinOffer(NamedTuple):
     in_rig: bool
     here: bool  # the launch starts inside the checkout
     live: bool = False  # the launch starts inside the checkout or in a folder above it
+    alone: bool = False  # in no rig of the launch and installed for none, so the checkout stands in for nothing
 
     @property
     def selected(self) -> bool:
-        """PIN-07..09: offered loading in the picker when the rigs include it or the launch starts inside it."""
-        return self.in_rig or self.here
+        """PIN-07..09, PIN-15: offered loading in the picker when the rigs include it, the launch starts inside
+        it, or it has no installed copy."""
+        return self.in_rig or self.here or self.alone
 
     @property
     def locked(self) -> bool:
         """PIN-08: a pin the rigs include loads, unless the launch starts in or above its checkout, where the
         session would run on the files it edits, so it can be skipped for this launch."""
         return self.in_rig and not self.live
+
+    @property
+    def settled(self) -> bool:
+        """LAUNCH-05, PIN-15: the launch needn't ask about it: it's locked, or it has no installed copy and the
+        launch doesn't start in or above its checkout, so it loads unless unticked in the picker."""
+        return self.locked or (self.alone and not self.live)
+
+    @property
+    def unasked(self) -> bool:
+        """PIN-10, PIN-15: loaded with no one to ask: the rigs include it, or it has no installed copy."""
+        return self.in_rig or self.alone
 
 
 def checked_pins() -> list[dict]:
@@ -1462,7 +1510,7 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
             if offer.locked:
                 state = "in these rigs, so the checkout loads"
             elif app.load(offer):
-                state = "the checkout loads"
+                state = "no installed copy, so the checkout loads" if offer.alone else "the checkout loads"
             else:
                 state = "the installed copy loads" if loaded else "not loaded"
             warning = (f"\n\n{LIVE} You're launching in or above this checkout, so the session runs on the files it "
@@ -1667,10 +1715,11 @@ def pin_lines(pins: list[tuple[dict, list[str]]]) -> list[str]:
             for pin, notes in pins]
 
 
-def describe_pins(chosen: list[tuple[dict, bool]], cwd: Path | None = None) -> list[str]:
-    """LAUNCH-02, PIN-07: the pins on the launch summary, marking the live checkouts the launch runs in."""
-    notes = lambda pin, load: ([f"{LIVE} live checkout"] if cwd and pinned_here(pin, cwd) else []) if load \
-        else ["not loaded"]
+def describe_pins(chosen: list[tuple[dict, bool]], cwd: Path | None = None, alone: set[str] = frozenset()) -> list[str]:
+    """LAUNCH-02, PIN-07, PIN-15: the pins on the launch summary, marking the live checkouts the launch runs in
+    and the ones loading because no copy is installed (`alone`, by checkout)."""
+    notes = lambda pin, load: ([f"{LIVE} live checkout"] if cwd and pinned_here(pin, cwd) else []) + \
+        (["no installed copy"] if pin["path"] in alone else []) if load else ["not loaded"]
     return pin_lines([(pin, notes(pin, load)) for pin, load in chosen]) or [f"{PIN} none"]
 
 

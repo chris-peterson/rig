@@ -53,6 +53,8 @@ export type Offer = {
   inRig: boolean
   /** The pin's checkout holds the session's folder. */
   here: boolean
+  /** PIN-15: in no rig of the launch and installed for none, so the checkout stands in for nothing. */
+  alone: boolean
 }
 
 export type Plan = {
@@ -74,8 +76,8 @@ export const nameOf = (pluginId: string): string => pluginId.split('@')[0] ?? pl
 /** PIN-08: a pin the rigs include loads, unless the launch starts inside it. */
 export const isLocked = (offer: Offer): boolean => offer.inRig && !offer.here
 
-/** PIN-07..09: selected when the rigs include it or the launch starts inside it. */
-export const isSelected = (offer: Offer): boolean => offer.inRig || offer.here
+/** PIN-07..09, PIN-15: selected when the rigs include it, the launch starts inside it, or it has no installed copy. */
+export const isSelected = (offer: Offer): boolean => offer.inRig || offer.here || offer.alone
 
 /** Whether the pin's checkout loads under these choices. */
 export function loads(offer: Offer, choices: Readonly<Record<string, boolean>>): boolean {
@@ -123,12 +125,18 @@ export function planOf(state: State, picks: Picks): Plan {
 
   const inRig = new Set([...sources.keys()].map(nameOf))
   const installed = new Set(state.installed)
+  const copies = new Set([...inRig, ...state.installed.map(nameOf)])
 
   return {
     selected: [...picks.rigs],
     sources,
     missing: [...sources.keys()].filter(p => !installed.has(p)),
-    offered: state.pins.map(pin => ({ pin, inRig: inRig.has(pin.plugin), here: state.here.includes(pin.path) })),
+    offered: state.pins.map(pin => ({
+      pin,
+      inRig: inRig.has(pin.plugin),
+      here: state.here.includes(pin.path),
+      alone: !copies.has(pin.plugin),
+    })),
     added,
     removed,
   }
@@ -294,7 +302,7 @@ export function pinStateOf(plan: Plan, pluginId: string, choices: Readonly<Recor
   }
 
   if (loads(offer, choices)) {
-    return 'the checkout loads'
+    return offer.alone ? 'no installed copy, so the checkout loads' : 'the checkout loads'
   }
 
   return plan.sources.has(pluginId) ? 'the installed copy loads' : 'not loaded'

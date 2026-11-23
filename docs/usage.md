@@ -233,7 +233,11 @@ clones:
 
 At launch, a pin loads when the rig includes its plugin. A pin the rig doesn't
 include is offered in the picker, not loading, and left out with nobody at a
-terminal. Starting inside a pinned checkout offers that pin selected. Starting
+terminal. A pin with no installed copy is different: it stands in for nothing,
+so pinning it can only mean loading it. That's a plugin you're writing, one no
+marketplace lists yet. It loads in every launch without asking, offered selected
+in the picker in case you want to leave it out, and the launch summary marks it
+`no installed copy`. Starting inside a pinned checkout offers that pin selected. Starting
 inside one, or in a folder above it, marks a loading pin ❗ in place of 📌: the
 session runs on the files it edits, which can give unpredictable results. Its
 pin's dialog says so and can skip the checkout for that launch only, leaving
@@ -266,8 +270,11 @@ a restart that keeps the conversation: rig records the switch, Claude Code
 exits on its own, and rig relaunches the same conversation with what you
 chose. A switch from the picker doesn't ask again. One that names rigs opens
 the picker first when they leave pins to choose. The sandbox stays as the
-session had it, and other Claude Code arguments from the first launch don't
-carry over.
+session had it, and so do the options you passed to Claude Code, such as
+`--plugin-dir` or `--model`. The prompt doesn't carry over, and neither does an
+option that picks or starts a conversation (`--continue`, `--resume`,
+`--session-id`, `--fork-session`, `--from-pr`, `--teleport`, `--worktree`),
+since the switch resumes the conversation itself.
 
 rig stays running while Claude Code does, which is how it sees the exit. A
 session started without rig, or with nobody at a terminal, can't be relaunched
@@ -291,7 +298,7 @@ to keep them that way.
 When a launch has something to decide (a plugin to install, or a pin the rigs
 don't settle), rig opens the `--select` picker first, with a toast saying why:
 the pin that holds this folder and whether its checkout loads, a pin the rigs
-leave out, the plugins that install at launch. The cursor starts on that pin's
+leave out that has an installed copy, the plugins that install at launch. The cursor starts on that pin's
 row, and `enter` there opens its choices. `l` launches, `q` cancels. A launch
 with nothing to decide skips the picker.
 

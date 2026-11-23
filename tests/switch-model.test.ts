@@ -69,6 +69,19 @@ describe('switch-model', () => {
     expect(Model.hereNotes(STATE, skipped)).toEqual(['📌 rig holds this folder: the installed copy loads  ✕'])
   })
 
+  test('PIN-15: a pin with no installed copy loads, and can be skipped', () => {
+    const mod = { plugin: 'mod', path: '/src/mod', display: '~/src/mod', age: 'just now' }
+    const world = { ...STATE, pins: [...STATE.pins, mod] }
+    const plan = Model.planOf(world, start)
+    const offer = Model.offerFor(plan, 'mod')
+
+    expect(offer && [offer.alone, Model.isSelected(offer), Model.isLocked(offer)]).toEqual([true, true, false])
+    expect(Model.pinStateOf(plan, 'mod', start.choices)).toBe('no installed copy, so the checkout loads')
+    const skipped = Model.togglePin(world, start, 'mod') ?? start
+    expect(Model.recorded(world, skipped).pins).toEqual({ '/src/rig': true, '/src/mod': false })
+    expect(Model.offerFor(plan, 'rig@cp')?.alone).toBe(false)
+  })
+
   test('RIG-14, PIN-12, SWITCH-05: the graph lists rigs’ plugins, then the rest installed, by name, a 📌 in front of pinned ones', () => {
     const graph = Model.graphOf(STATE)
 

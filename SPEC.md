@@ -292,12 +292,14 @@ When a launch's rigs include a pinned plugin, the system shall load the pinned
 checkout in place of the installed copy.
 
 #### `PIN-09`
-When an interactive launch's rigs do not include a pinned plugin, the system
-shall offer that pin in the picker, not loading.
+When an interactive launch's rigs do not include a pinned plugin that has a
+copy installed for the working directory, the system shall offer that pin in
+the picker, not loading.
 
 #### `PIN-10`
-If a launch's rigs do not include a pinned plugin and no one is at a terminal
-to ask, then the system shall launch without that pin.
+If a launch's rigs do not include a pinned plugin that has a copy installed
+for the working directory and no one is at a terminal to ask, then the system
+shall launch without that pin.
 
 #### `PIN-11`
 Where a launch loads a pin whose checkout holds the working directory or sits
@@ -326,6 +328,16 @@ When the user runs `rig pin` or `rig unpin` with no arguments, the system shall
 act on the checkout the working directory is in: for `pin`, the nearest folder
 at or above it that holds a plugin manifest; for `unpin`, the pin whose
 checkout holds it.
+
+#### `PIN-15`
+When a launch's rigs do not include a pinned plugin and no copy of it is
+installed for the working directory, the system shall load the pin without
+asking, offer it in the picker loading, and note `no installed copy` on its
+line of the launch summary; a launch that starts in or above its checkout
+offers it as PIN-07 says.
+
+> Rationale: such a pin stands in for nothing, so pinning it can only mean
+> loading it: a plugin under development that no marketplace lists yet.
 
 ### `SANDBOX`
 Sandbox
@@ -362,7 +374,8 @@ When an interactive launch has a plugin to install or a pin to choose, the
 system shall open the picker as `--select` does, with its cursor on the first
 pin to choose, else the first plugin to install, and a notice naming each: a
 pin that holds the working directory and whether its checkout loads, a pin the
-rigs leave out, and the plugins that install at launch.
+rigs leave out that has an installed copy, and the plugins that install at
+launch.
 
 #### `LAUNCH-06`
 While an interactive launch runs, the system shall stay running until Claude
@@ -464,6 +477,12 @@ names over as few rows as fit when the pane is too narrow for them on one, and
 ask a docked seat for no more width than two such rows take. Against what the
 session loads, it shall show each rig and plugin the switch brings in in green
 and each it takes out in red, listing those plugins under the summary.
+
+#### `SWITCH-06`
+When a switch relaunches Claude Code, the system shall pass it the options the
+launch before it passed through, each with its values as `claude --help` says
+it takes them, leaving out the prompt, anything after `--`, and the options that
+pick or start a conversation.
 
 ### `SHELL`
 Shell integration

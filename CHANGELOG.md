@@ -5,6 +5,16 @@
 - `rig setup` no longer crashes when the cursor reaches a rig whose rules name
   only files (`exists:`) and no `path:`. It crashed while titling the rig's
   plugin list.
+- A pin for a plugin with no installed copy, such as one you're writing that
+  no marketplace lists yet, now loads in every launch without asking, with or
+  without a terminal. The picker offers it selected, so you can still leave it
+  out, and the launch summary marks it `no installed copy`. A pin for an
+  installed plugin your rigs leave out is still offered unselected.
+- A switch keeps the options you passed to Claude Code, such as `--plugin-dir`,
+  `--model`, or `--add-dir`, so a plugin loaded by hand no longer disappears
+  after `/rig`. The prompt doesn't carry over, and neither do the options that
+  pick or start a conversation, such as `--continue`, `--resume`, or
+  `--worktree`.
 
 ## 0.4.0
 

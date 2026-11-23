@@ -33,8 +33,11 @@ FAKE_CLAUDE = textwrap.dedent('''\
     HELP = """Usage: claude [options] [command] [prompt]
 
     Options:
+      --add-dir <directories...>            More directories Claude can access
       -c, --continue                        Continue the most recent conversation
+      -d, --debug [filter]                  Enable debug mode
       --model <model>                       Model for the current session
+      --plugin-dir <path>                   Load a plugin from a directory
       -p, --print                           Print response and exit
       -r, --resume [value]                  Resume a conversation
       --settings <file-or-json>             Path to a settings file or a JSON string
@@ -619,6 +622,30 @@ class Switch(RigCase):
         self.assertIn("sandbox", json.loads(self.claude_calls()[1][1]))
         self.assertEqual(list((self.home / ".rig" / "switch").iterdir()), [])
 
+    def test_switch_06_relaunch_keeps_the_options_passed_through(self):
+        self.env["RIG_TEST_SWITCH_TO"] = "web"
+        mod = self.home / "mod"
+        status, output = self.rig_tty("claude", "--model", "opus", "fix the bug", "--plugin-dir", str(mod),
+                                      "--add-dir", "x", "y", "-c")
+        self.assertEqual(status, 0, output)
+        (_, first_args), (_, second_args) = self.launches()
+        self.assertEqual(first_args, ["--model", "opus", "fix the bug", "--plugin-dir", str(mod), "--add-dir", "x", "y", "-c"])
+        self.assertEqual(second_args[:-1], ["--model", "opus", "--plugin-dir", str(mod), "--add-dir", "x", "y", "--resume", "abc"])
+        self.assertIn("rig relaunched this conversation", second_args[-1])
+
+    def test_switch_06_carried_arguments(self):
+        rig = load_rig()
+        rig._CLAUDE_HELP.append((set(), {"--plugin-dir": rig.VALUE, "--add-dir": rig.VALUES, "-d": rig.OPTIONAL,
+                                         "--debug": rig.OPTIONAL, "-r": rig.OPTIONAL, "--resume": rig.OPTIONAL,
+                                         "--session-id": rig.VALUE, "-w": rig.OPTIONAL, "--bare": rig.FLAG}))
+        self.assertEqual(rig.carried_args(["--plugin-dir=/m", "--debug", "hooks", "go", "--bare"]),
+                         ["--plugin-dir=/m", "--debug", "hooks", "--bare"])
+        self.assertEqual(rig.carried_args(["-d", "--add-dir", "a", "b", "--plugin-dir", "-weird", "--", "--bare"]),
+                         ["-d", "--add-dir", "a", "b", "--plugin-dir", "-weird"])
+        relaunch = ["--plugin-dir", "/m", "--resume", "abc", "rig relaunched this conversation"]
+        self.assertEqual(rig.carried_args(relaunch), ["--plugin-dir", "/m"])
+        self.assertEqual(rig.carried_args(["--session-id", "u", "-w", "tree", "-r", "--bare"]), ["--bare"])
+
     def test_launch_06_exits_with_claudes_status(self):
         self.env["RIG_TEST_EXIT"] = "3"
         status, output = self.rig_tty("claude")
@@ -1175,6 +1202,39 @@ class Pins(RigCase):
         result = self.rig("-p", "hi")
         self.assertNotIn("--plugin-dir", self.launched()[1])
         self.assertIn("📌 x  ~/src/x  (just now, not loaded)", result.stderr)
+
+    def test_pin_15_pin_with_no_installed_copy_loads_headless(self):
+        mod = self.checkout("mod")
+        self.rig("pin", str(mod))
+        result = self.rig("-p", "hi")
+        self.assertEqual(self.launched()[1][:2], ["--plugin-dir", str(mod.resolve())])
+        self.assertIn("📌 mod  ~/src/mod  (just now, no installed copy)", result.stderr)
+
+    def test_pin_15_pin_with_no_installed_copy_loads_without_asking(self):
+        mod = self.checkout("mod")
+        self.rig("pin", str(mod))
+        status, output = self.rig_tty("claude")
+        self.assertEqual(status, 0, output)
+        self.assertNotIn(ALT_SCREEN.decode(), output)
+        self.assertEqual(self.launched()[1][:2], ["--plugin-dir", str(mod.resolve())])
+
+    def test_pin_15_inside_a_pin_with_no_installed_copy_asks_as_pin_07_does(self):
+        mod = self.checkout("mod")
+        self.rig("pin", str(mod))
+        status, output = self.rig_tty("claude", keys=["l"], cwd=mod)
+        self.assertEqual(status, 0, output)
+        self.assertIn("you're in or above its checkout", output)
+        self.assertEqual(self.launched()[1][:2], ["--plugin-dir", str(mod.resolve())])
+
+    def test_pin_15_offered_loading_and_can_be_skipped(self):
+        rig = load_rig()
+        mod, b = {"plugin": "mod", "path": str(self.home / "src" / "mod")}, {"plugin": "b", "path": str(self.ckout)}
+        rigs = {"base": {"plugins": ["a@m"]}}
+        mod_offer, b_offer = rig.plan([], rigs, {"a@m", "b@m"}, [mod, b], self.away).offered
+        self.assertEqual((mod_offer.alone, mod_offer.selected, mod_offer.locked, mod_offer.settled), (True, True, False, True))
+        self.assertEqual((b_offer.alone, b_offer.selected, b_offer.settled), (False, False, False))
+        [in_rig] = rig.plan([], {"base": {"plugins": ["mod@m"]}}, set(), [mod], self.away).offered
+        self.assertFalse(in_rig.alone)
 
     def test_pin_12_list_and_graph_mark_pinned_plugins(self):
         self.rig("pin", str(self.ckout))
