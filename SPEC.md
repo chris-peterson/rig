@@ -451,8 +451,9 @@ terminal, the system shall record the switch and exit Claude Code.
 When Claude Code exits after a recorded switch, the system shall launch the
 named rigs resuming the same conversation, with the launch's sandbox state:
 with the plugins and pins chosen in the switch pane, without asking again, or,
-for a switch that names rigs, offering pins as any launch does. The resumed conversation shall open with a turn
-saying the switch is done.
+for a switch that names rigs, offering pins as any launch does. The resumed
+conversation shall open with no new turn, and a toast naming what the session
+switched to.
 
 #### `SWITCH-03`
 If the user runs `/rig`, naming rigs or not, in a session rig did not

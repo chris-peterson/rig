@@ -31,7 +31,9 @@ Maintained by `/sextant:spec-status`.
 STATUS.md updated: +2 IDs (PIN-15 a pin with no installed copy loads without
 asking, SWITCH-06 a switch's relaunch keeps the options passed through; both
 Covered); PIN-09, PIN-10, and LAUNCH-05 narrowed to pins with an installed
-copy, still Covered (#3). Coverage 100 of 100.
+copy, still Covered (#3). SWITCH-02 reworded: the relaunch adds no turn,
+and the `/rig` mod toasts what the session switched to (`RIG_SWITCHED`); the
+toast at a live session start hasn't been seen yet. Coverage 100 of 100.
 
 ### 2026-11-21: A project's plugin opt-out holds
 

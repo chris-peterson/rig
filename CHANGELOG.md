@@ -15,6 +15,10 @@
   after `/rig`. The prompt doesn't carry over, and neither do the options that
   pick or start a conversation, such as `--continue`, `--resume`, or
   `--worktree`.
+- A switch resumes the conversation quietly. rig used to open the relaunched
+  session with a turn asking Claude to confirm the switch, which held up
+  whatever you typed next, a second `/rig` included. A toast now names the
+  rigs it switched to, and nothing is added to the conversation.
 
 ## 0.4.0
 

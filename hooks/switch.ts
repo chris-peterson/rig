@@ -230,6 +230,13 @@ export function register(on: On): void {
       argumentHint: '[rig...]',
     })
 
+    // SWITCH-02: a switch's relaunch says so in a toast rather than a turn, so the conversation resumes quietly.
+    const switched = await $.env.get('RIG_SWITCHED')
+
+    if (switched && e.isInteractive) {
+      $.ui.toast(`rig: switched to ${switched}`, { timeoutMs: 8000 })
+    }
+
     return next(e)
   })
 

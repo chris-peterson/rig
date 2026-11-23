@@ -14,6 +14,24 @@ describe('switch', () => {
     expect(world.commands).toEqual(['rig'])
   })
 
+  test('SWITCH-02: a switch’s relaunch says so in a toast', async ($, on) => {
+    const world = worldOf(on)
+
+    mock.env(on, { RIG_SWITCHED: 'base + ops' })
+    await $.session.start(SESSION)
+
+    expect(world.toasts).toEqual(['rig: switched to base + ops'])
+  })
+
+  test('SWITCH-02: a launch that is no switch shows no toast', async ($, on) => {
+    const world = worldOf(on)
+
+    mock.env(on, { RIG_SWITCHED: '' })
+    await $.session.start(SESSION)
+
+    expect(world.toasts).toEqual([])
+  })
+
   test('SWITCH-01: /rig <rig> records the switch with the session id and exits Claude Code', async ($, on) => {
     const world = worldOf(on)
     const clock = mock.clock(on)

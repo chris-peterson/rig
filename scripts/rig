@@ -540,21 +540,21 @@ def launch(selected: list[str] | None, args: list[str]) -> None:
     if not interactive(args):
         exec_claude(claude_args(selected, args, sandbox_flag, reasons=reasons)[1])
     request = switch_file()
-    picks = None
+    picks, switched = None, ""
     try:
         while True:
             selected, arguments, chose = claude_args(selected, args, sandbox_flag, select_flag, reasons, picks)
             select_flag, reasons = False, {}
             status = run_claude(arguments, {SWITCH_ENV: str(request), CURRENT_RIG_ENV: " ".join(selected) or BASE,
-                                            PICKS_ENV: json.dumps(chose)})
+                                            PICKS_ENV: json.dumps(chose), SWITCHED_ENV: switched})
             switch = take_switch(request)
             if switch is None:
                 raise SystemExit(status)
             selected = switch["rigs"]
-            args = [*carried_args(args), "--resume", switch["session"], switched_prompt(selected)]
+            args = [*carried_args(args), "--resume", switch["session"]]
             picks = switch if "pins" in switch else None
-            print(f"{PROG}: switching to {label(selected, *picked(picks))}, resuming this conversation",
-                  file=sys.stderr)
+            switched = label(selected, *picked(picks))
+            print(f"{PROG}: switching to {switched}, resuming this conversation", file=sys.stderr)
     finally:
         request.unlink(missing_ok=True)
 
@@ -568,7 +568,7 @@ FIRST_LAUNCH_ONLY = {"-c", "--continue", "-r", "--resume", "--session-id", "--fo
 def carried_args(args: list[str]) -> list[str]:
     """SWITCH-06: the arguments a switch's relaunch keeps from the launch before it: each option passed through
     to Claude Code with its values, read as `claude --help` says it takes them, less the ones that pick or start
-    a conversation. The prompt, and anything after `--`, stays behind."""
+    a conversation. The prompt, and anything after `--`, stays behind, so the relaunch adds no turn."""
     takes = claude_help()[1]
     end = args.index("--") if "--" in args else len(args)
     kept, index = [], 0
@@ -710,6 +710,7 @@ def stock_args(selected: list[str], args: list[str], sandbox_flag: bool) -> list
 SWITCH_ENV = "RIG_SWITCH_FILE"
 CURRENT_RIG_ENV = "RIG_CURRENT"
 PICKS_ENV = "RIG_PICKS"  # what a launch picked beyond its rigs, as JSON: plugins added and taken out, each pin's load
+SWITCHED_ENV = "RIG_SWITCHED"  # SWITCH-02: on a switch's relaunch, what it switched to, for the mod's toast; else empty
 
 
 def switch_file() -> Path:
@@ -724,13 +725,6 @@ def take_switch(path: Path) -> dict | None:
     switch = read_yaml(path)
     path.unlink()
     return switch
-
-
-def switched_prompt(selected: list[str]) -> str:
-    """SWITCH-02: the turn a relaunch opens with, so the resumed conversation doesn't end on "type /exit"."""
-    return (f"rig relaunched this conversation with {label(selected)}; the switch is done. "
-            "In a line or two, confirm it and say what this session can do now that it couldn't before, "
-            "then carry on with what we were doing.")
 
 
 def run_claude(args: list[str], env: dict[str, str]) -> int:

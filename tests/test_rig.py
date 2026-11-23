@@ -63,6 +63,8 @@ FAKE_CLAUDE = textwrap.dedent('''\
         subprocess.run([sys.executable, os.environ["RIG_TEST_RIG"], "switch", *how, "--session", "abc"], check=True)
     with open(os.environ["RIG_TEST_ARGV"] + ".picks", "a") as f:
         f.write(json.dumps(os.environ.get("RIG_PICKS")) + "\\n")
+    with open(os.environ["RIG_TEST_ARGV"] + ".switched", "a") as f:
+        f.write(json.dumps(os.environ.get("RIG_SWITCHED")) + "\\n")
     sys.exit(int(os.environ.get("RIG_TEST_EXIT", "0")))
     ''')
 
@@ -616,9 +618,9 @@ class Switch(RigCase):
         self.assertIn("rig: relaunching this conversation with base + web", output)
         (first, first_args), (second, second_args) = self.launches()
         self.assertEqual((first, first_args), ({"a@m", "b@m"}, ["fix the bug"]))
-        self.assertEqual((second, second_args[:2]), ({"a@m", "b@m", "c@n"}, ["--resume", "abc"]))
-        self.assertEqual(len(second_args), 3)
-        self.assertIn("rig relaunched this conversation with base + web", second_args[2])
+        self.assertEqual((second, second_args), ({"a@m", "b@m", "c@n"}, ["--resume", "abc"]))
+        switched = [json.loads(line) for line in Path(f"{self.argv_log}.switched").read_text().splitlines()]
+        self.assertEqual(switched, ["", "base + web"])
         self.assertIn("sandbox", json.loads(self.claude_calls()[1][1]))
         self.assertEqual(list((self.home / ".rig" / "switch").iterdir()), [])
 
@@ -630,8 +632,7 @@ class Switch(RigCase):
         self.assertEqual(status, 0, output)
         (_, first_args), (_, second_args) = self.launches()
         self.assertEqual(first_args, ["--model", "opus", "fix the bug", "--plugin-dir", str(mod), "--add-dir", "x", "y", "-c"])
-        self.assertEqual(second_args[:-1], ["--model", "opus", "--plugin-dir", str(mod), "--add-dir", "x", "y", "--resume", "abc"])
-        self.assertIn("rig relaunched this conversation", second_args[-1])
+        self.assertEqual(second_args, ["--model", "opus", "--plugin-dir", str(mod), "--add-dir", "x", "y", "--resume", "abc"])
 
     def test_switch_06_carried_arguments(self):
         rig = load_rig()
@@ -642,7 +643,7 @@ class Switch(RigCase):
                          ["--plugin-dir=/m", "--debug", "hooks", "--bare"])
         self.assertEqual(rig.carried_args(["-d", "--add-dir", "a", "b", "--plugin-dir", "-weird", "--", "--bare"]),
                          ["-d", "--add-dir", "a", "b", "--plugin-dir", "-weird"])
-        relaunch = ["--plugin-dir", "/m", "--resume", "abc", "rig relaunched this conversation"]
+        relaunch = ["--plugin-dir", "/m", "--resume", "abc"]
         self.assertEqual(rig.carried_args(relaunch), ["--plugin-dir", "/m"])
         self.assertEqual(rig.carried_args(["--session-id", "u", "-w", "tree", "-r", "--bare"]), ["--bare"])
 

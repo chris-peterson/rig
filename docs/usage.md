@@ -268,7 +268,8 @@ to the rigs you name.
 A session can't change its plugins while it runs, so the switch happens across
 a restart that keeps the conversation: rig records the switch, Claude Code
 exits on its own, and rig relaunches the same conversation with what you
-chose. A switch from the picker doesn't ask again. One that names rigs opens
+chose. The relaunch adds nothing to the conversation: a toast names the rigs it
+switched to, and the session waits for your next prompt. A switch from the picker doesn't ask again. One that names rigs opens
 the picker first when they leave pins to choose. The sandbox stays as the
 session had it, and so do the options you passed to Claude Code, such as
 `--plugin-dir` or `--model`. The prompt doesn't carry over, and neither does an
