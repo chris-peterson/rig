@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 - `p` in the `--select` picker pins the plugin on the cursor's row. rig pins
   the checkout it finds without asking for a path, and when it finds none,
