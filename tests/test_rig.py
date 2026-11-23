@@ -1056,25 +1056,49 @@ class Pins(RigCase):
         self.assertIn("b is already pinned", result.stderr)
 
     def test_pin_02_name_resolves_to_marketplace_clone(self):
-        clones = self.home / "src" / "github"
-        clone = clones / "acme" / "widget"
-        (clone / ".claude-plugin").mkdir(parents=True)
-        (clone / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "widget"}))
-        subprocess.run(["git", "init", "-q", str(clone)], check=True)
-        subprocess.run(["git", "-C", str(clone), "remote", "add", "origin", "git@github.com:acme/widget.git"], check=True)
-        market = self.home / ".claude" / "plugins" / "marketplaces" / "acme"
-        (market / ".claude-plugin").mkdir(parents=True)
-        (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
-            {"plugins": [{"name": "widget", "source": {"source": "github", "repo": "acme/widget"}}]}))
-        (self.home / ".claude" / "plugins" / "known_marketplaces.json").write_text(json.dumps(
-            {"acme": {"installLocation": str(market), "source": {"source": "github", "repo": "acme/market"}}}))
+        clones = self.market_clones("widget")
         no_clones = self.rig("pin", "widget")
-        self.assertIn("names no clone folder for github.com", no_clones.stderr)
+        self.assertIn("nor a pin shows where your github.com clones live", no_clones.stderr)
         self.write_rigs(BASIC_RIGS.rstrip(" ") + f"    clones:\n      github.com: {clones}\n")
         result = self.rig("pin", "widget")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.pins()[0]["path"], str(clone.resolve()))
+        self.assertEqual(self.pins()[0]["path"], str((clones / "acme" / "widget").resolve()))
         self.assertEqual(self.rig("complete", "pinnable").stdout, "")
+
+    def market_clones(self, *names: str) -> Path:
+        """A marketplace listing each name from github.com/acme/<name>, each cloned under the folder returned."""
+        clones = self.home / "src" / "github"
+        for name in names:
+            clone = clones / "acme" / name
+            (clone / ".claude-plugin").mkdir(parents=True)
+            (clone / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": name}))
+            subprocess.run(["git", "init", "-q", str(clone)], check=True)
+            subprocess.run(["git", "-C", str(clone), "remote", "add", "origin", f"git@github.com:acme/{name}.git"],
+                           check=True)
+        market = self.home / ".claude" / "plugins" / "marketplaces" / "acme"
+        (market / ".claude-plugin").mkdir(parents=True)
+        (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+            {"plugins": [{"name": name, "source": {"source": "github", "repo": f"acme/{name}"}} for name in names]}))
+        (self.home / ".claude" / "plugins" / "known_marketplaces.json").write_text(json.dumps(
+            {"acme": {"installLocation": str(market), "source": {"source": "github", "repo": "acme/market"}}}))
+        return clones
+
+    def test_pin_02_name_resolves_through_the_folder_a_pin_shows(self):
+        clones = self.market_clones("widget", "gadget")
+        self.assertEqual(self.rig("complete", "pinnable").stdout, "")
+        self.assertEqual(self.rig("pin", str(clones / "acme" / "widget")).returncode, 0)
+        self.assertEqual(self.rig("complete", "pinnable").stdout, "gadget:~/src/github/acme/gadget\n")
+        result = self.rig("pin", "gadget")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual({pin["plugin"]: pin["path"] for pin in self.pins()}["gadget"],
+                         str((clones / "acme" / "gadget").resolve()))
+
+    def test_pin_16_unresolved_name_names_the_path_form(self):
+        self.market_clones("widget")
+        result = self.rig("pin", "widget")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rig pin <path>", result.stderr)
+        self.assertIn("rig pin <path>", self.rig("pin", "nosuch").stderr)
 
     def test_pin_03_no_manifest_refused(self):
         empty = self.home / "empty"
@@ -2340,6 +2364,55 @@ class Picker(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(app.screen.query("#pin-load")), 0)
             await pilot.press("escape", "l")
         self.assertEqual(self.choices(app), {"inrig": True, "here": False, "outside": True})
+
+    async def test_pin_17_p_pins_the_checkout_a_name_resolves_to(self):
+        checkout = Path(self._tmp.name) / "src" / "a"
+        (checkout / ".claude-plugin").mkdir(parents=True)
+        (checkout / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "a"}))
+        app, running = self.running()
+        with unittest.mock.patch.object(self.rig, "resolve_name", return_value=checkout):
+            async with running as pilot:
+                await pilot.pause()
+                await pilot.press("down", "p")
+                await pilot.pause()
+                self.assertNotEqual(type(app.screen).__name__, "FolderBrowser")
+                self.assertIn(f"{self.rig.PIN} a", self.lines(app)[2])
+                await pilot.press("p")
+                await pilot.pause()
+                self.assertEqual(type(app.screen).__name__, "PinDialog")
+                await pilot.press("escape", "l")
+        self.assertEqual(self.choices(app)["a"], True)
+        self.assertIn(str(checkout.resolve()), [pin["path"] for pin in self.rig.read_pins()])
+
+    async def test_pin_18_the_browser_pins_only_the_rows_plugin(self):
+        home = Path(self._tmp.name)
+        for folder, name in (("aaa", None), ("other", "z"), ("plug", "a")):
+            (home / folder).mkdir()
+            if name:
+                (home / folder / ".claude-plugin").mkdir()
+                (home / folder / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": name}))
+        app, running = self.running()
+        unresolved = self.rig.Unresolved("a comes from nowhere. Pin it by path: rig pin <path>")
+        with unittest.mock.patch.object(self.rig, "resolve_name", side_effect=unresolved):
+            async with running as pilot:
+                await pilot.pause()
+                await pilot.press("down", "p")
+                await pilot.pause(0.3)
+                self.assertEqual(type(app.screen).__name__, "FolderBrowser")
+                self.assertIn("comes from nowhere", str(app.screen.query_one("#browse-why").render()))
+                refused = lambda: str(app.screen.query_one("#browse-refused").render())
+                await pilot.press("down", "p")
+                self.assertIn("aaa holds no plugin manifest", refused())
+                await pilot.press("down", "p")
+                self.assertIn("other holds z, not a", refused())
+                await pilot.press("l")
+                self.assertEqual(type(app.screen).__name__, "FolderBrowser")
+                await pilot.press("down")
+                await pilot.click("#pin-folder")
+                await pilot.pause()
+                self.assertNotEqual(type(app.screen).__name__, "FolderBrowser")
+                await pilot.press("l")
+        self.assertEqual({pin["plugin"]: pin["path"] for pin in self.rig.read_pins()}["a"], str((home / "plug").resolve()))
 
     async def test_launch_07_e_leaves_for_the_editor_with_the_rigs_chosen(self):
         app, running = self.running()

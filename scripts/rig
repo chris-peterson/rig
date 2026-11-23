@@ -1063,7 +1063,7 @@ def marketplace_plugins() -> list[tuple[str, dict, dict]]:
     """(marketplace, its known_marketplaces.json entry, plugin entry) for every plugin a known marketplace lists."""
     known = Path.home() / ".claude" / "plugins" / "known_marketplaces.json"
     if not known.exists():
-        raise Unresolved(f"{known} does not exist, so plugin names can't be looked up. Pass a path.")
+        raise Unresolved(f"{known} does not exist, so plugin names can't be looked up. Pin it by path: rig pin <path>")
     plugins = []
     for market, entry in json.loads(known.read_text()).items():
         location = Path(entry["installLocation"])
@@ -1090,7 +1090,8 @@ def marketplace_sources(name: str) -> list[tuple[str, str]]:
         elif source["source"] in ("url", "git-subdir", "git"):
             url = source["url"]
         else:
-            raise Unresolved(f"{name} in {market} comes from a {source['source']} source; pass a path.")
+            raise Unresolved(f"{name} in {market} comes from a {source['source']} source, not a git repo. "
+                             f"Pin it by path: rig pin <path>")
         sources.append((url, subdir.removeprefix("./")))
     return sources
 
@@ -1104,29 +1105,52 @@ def resolve_name(name: str, clones: dict[str, Path]) -> Path:
     """PIN-02: the local clone of the plugin's marketplace source repo."""
     sources = marketplace_sources(name)
     if not sources:
-        raise Unresolved(f"no known marketplace lists a plugin named {name}, and ./{name} doesn't exist. Pass a path.")
+        raise Unresolved(f"no known marketplace lists a plugin named {name}, and ./{name} doesn't exist. "
+                         f"Pin it by path: rig pin <path>")
     candidates = {}
     for url, subdir in sources:
         host, repo = repo_key(url)
         if host not in clones:
-            raise Unresolved(f"{name} comes from {url}, and {rigs_file()} names no clone folder for {host} "
-                             f"under clones. Add `{host}: <folder holding your {host} clones>` there, or pass a path.")
+            raise Unresolved(f"{name} comes from {url}, and neither {rigs_file()} (under clones) nor a pin shows "
+                             f"where your {host} clones live. Pin it by path: rig pin <path>. Or add "
+                             f"`{host}: <folder holding your {host} clones>` under clones.")
         clone = clones[host] / repo
         if not clone.is_dir():
-            raise Unresolved(f"{name} comes from {url}, which isn't cloned at {clone}. Clone it there or pass a path.")
+            raise Unresolved(f"{name} comes from {url}, which isn't cloned at {clone}. "
+                             f"Clone it there, or pin it by path: rig pin <path>")
         origin = origin_url(clone)
         if not origin or repo_key(origin) != (host, repo):
-            raise Unresolved(f"{clone} has origin {origin or 'unset'}, not {url}.")
+            raise Unresolved(f"{clone} has origin {origin or 'unset'}, not {url}. Pin it by path: rig pin <path>")
         candidates[clone / subdir if subdir else clone] = url
     if len(candidates) > 1:
-        raise Unresolved(f"{name} resolves to {len(candidates)} checkouts; pass one: "
+        raise Unresolved(f"{name} resolves to {len(candidates)} checkouts; pin one by path (rig pin <path>): "
                          + ", ".join(map(str, candidates)))
     return next(iter(candidates))
 
 
+def inferred_roots(pins: list[dict]) -> dict[str, Path]:
+    """PIN-02: host -> the folder its clones live in, as each pin's checkout and origin show it: a checkout
+    in a clone of github.com/acme/widget at ~/src/github/acme/widget puts github.com's clones in ~/src/github."""
+    roots = {}
+    for pin in pins:
+        top = subprocess.run(["git", "-C", str(pin["path"]), "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True).stdout.strip()
+        origin = origin_url(Path(top)) if top else ""
+        try:
+            host, repo = repo_key(origin) if origin else ("", "")
+        except Unresolved:
+            continue
+        parts, top_parts = Path(repo).parts, Path(top).parts
+        if host and parts and top_parts[-len(parts):] == parts:
+            roots.setdefault(host, Path(*top_parts[:-len(parts)]))
+    return roots
+
+
 def clone_roots() -> dict[str, Path]:
+    """PIN-02: the folder each host's clones live in, from rigs.yml's clones, else as the pins show it."""
     config = load_config()
-    return {host: Path(folder).expanduser() for host, folder in (config or {}).get("clones", {}).items()}
+    named = {host: Path(folder).expanduser() for host, folder in (config or {}).get("clones", {}).items()}
+    return {**inferred_roots(read_pins()), **named}
 
 
 def show_pins() -> int:
@@ -1152,10 +1176,14 @@ def cmd_pins(args: list[str]) -> int:
     return show_pins()
 
 
-def cmd_pin(args: list[str]) -> int:
-    """PIN-01..03, PIN-14."""
-    args = args or [str(plugin_root(Path.cwd()))]
+def new_pin(path: Path, name: str) -> dict:
     from datetime import datetime, timezone
+    return {"path": str(path), "plugin": name, "pinned_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+
+
+def cmd_pin(args: list[str]) -> int:
+    """PIN-01..03, PIN-14, PIN-16."""
+    args = args or [str(plugin_root(Path.cwd()))]
     pins = read_pins()
     for arg in args:
         path = Path(arg).expanduser().resolve()
@@ -1175,8 +1203,7 @@ def cmd_pin(args: list[str]) -> int:
             continue
         if same:
             fail(f"{name} is already pinned at {display(same['path'])}. Unpin it first: rig unpin {name}")
-        pins.append({"path": str(path), "plugin": name,
-                     "pinned_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+        pins.append(new_pin(path, name))
         print(f"{PROG}: pinned {name} at {display(path)}")
     write_pins(pins)
     return 0
@@ -1291,7 +1318,7 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
                title: str = f"{PROG} --select", notice: str = "", focus: str | None = None):
     """LAUNCH-07..11: pick the rigs on the graph `rig list --graph` prints, `full` among them. One cursor sits
     on a rig's name or a plugin's row, and space, enter, or a click toggles what it's on: a rig (`full` alone)
-    or a plugin, a pinned one opening its pin. e opens the rig editor, and l or the 🚀 launches. The header is the command line that opened it.
+    or a plugin, a pinned one opening its pin. p pins a plugin (PIN-17), e opens the rig editor, and l or the 🚀 launches. The header is the command line that opened it.
     LAUNCH-05: opened unasked, it shows the notice saying why and starts with the cursor on the focus row. Exits with (the rigs, each pin and
     whether to load it, the plugins picked, the plugins taken out), or (EDIT, the rigs, picked, taken out), or
     None when cancelled."""
@@ -1302,7 +1329,7 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
     from textual.geometry import Region
     from textual.screen import ModalScreen
     from textual.widget import Widget
-    from textual.widgets import Button, Footer, Static
+    from textual.widgets import Button, DirectoryTree, Footer, Static
 
     names = [rig["name"] for rig in columns]
     defaults = any(rig["default"] for rig in columns)
@@ -1325,7 +1352,7 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
                     Binding("left", "across(-1)", show=False), Binding("right", "across(1)", show=False),
                     Binding("tab", "cycle(1)", show=False), Binding("shift+tab", "cycle(-1)", show=False),
                     Binding("space", "activate", "Toggle"), Binding("enter", "activate", show=False),
-                    Binding("e", "edit", "Edit rigs")]
+                    Binding("p", "pin", "Pin"), Binding("e", "edit", "Edit rigs")]
 
         def __init__(self):
             super().__init__(id="graph")
@@ -1411,6 +1438,13 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
                 self.app.toggle_rig(self.column)
             else:
                 self.app.activate(layout.rows[self.row])
+
+        def action_pin(self) -> None:
+            """PIN-17: p pins the plugin on the cursor's row, or opens its pin."""
+            if self.row == RIGS:
+                self.app.say(f"p pins the plugin on the cursor's row; move down to one.")
+            else:
+                self.app.pin_row(layout.rows[self.row])
 
         def action_edit(self) -> None:
             current = self.app.current
@@ -1531,6 +1565,58 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
         def action_close(self) -> None:
             self.dismiss()
 
+    class Folders(DirectoryTree):
+        """The folders under a root, hidden ones aside: where a checkout can be."""
+
+        def filter_paths(self, paths):
+            return [path for path in paths if path.is_dir() and not path.name.startswith(".")]
+
+    class FolderBrowser(ModalScreen):
+        """PIN-18: pick the checkout to pin for a plugin rig couldn't find one for; p or Pin pins the folder under
+        the cursor, refused when it holds no plugin manifest or another plugin's; escape or the ✕ closes it."""
+
+        BINDINGS = [Binding("p", "pin", "Pin"), Binding("escape", "close", "Close")]
+
+        def __init__(self, plugin_id: str, why: str):
+            super().__init__()
+            self.plugin_id = plugin_id
+            self.why = why
+
+        def compose(self) -> ComposeResult:
+            name = self.plugin_id.split("@")[0]
+            with Vertical(id="browser"):
+                with Horizontal(id="pin-head"):
+                    yield Static(Text(f"{PIN} Pin {name}: pick its checkout", "bold"), id="pin-title")
+                    yield Static("✕", id="pin-close")
+                yield Static(Text(self.why, MUTED), id="browse-why")
+                yield Folders(Path.home(), id="folders")
+                yield Static(id="browse-refused")
+                with Horizontal(id="pin-buttons"):
+                    yield Button("Pin this folder", variant="primary", id="pin-folder")
+
+        def on_mount(self) -> None:
+            self.query_one(Folders).focus()
+
+        def on_click(self, event) -> None:
+            if event.widget is not None and event.widget.id == "pin-close":
+                self.dismiss()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            self.action_pin()
+
+        def action_pin(self) -> None:
+            node = self.query_one(Folders).cursor_node
+            if node is None or node.data is None:
+                return
+            refused = self.app.pin_at(self.plugin_id, Path(node.data.path))
+            if refused:
+                self.query_one("#browse-refused", Static).update(Text(refused, WARN))
+            else:
+                self.dismiss()
+
+        def action_close(self) -> None:
+            self.dismiss()
+
     class RigPicker(App):
         TITLE = "rig"
         LAYOUT = layout
@@ -1555,6 +1641,10 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
         #pin-close:hover {{ color: {WARN}; }}
         #pin-buttons {{ height: auto; margin-top: 1; align-horizontal: center; }}
         #pin-buttons Button {{ margin: 0 1; }}
+        FolderBrowser {{ align: center middle; }}
+        #browser {{ width: 80%; height: 80%; border: round $border; background: $surface; padding: 1 2; }}
+        #browse-why, #browse-refused {{ height: auto; }}
+        #folders {{ height: 1fr; margin: 1 0; background: $surface; }}
         """
 
         def __init__(self):
@@ -1660,17 +1750,50 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
             else:
                 self.toggle_plugin(plugin_id)
 
+        def repin(self) -> None:
+            """Mark the rows for the pins as they now stand, and plan again with them."""
+            for index, plugin_id in enumerate(layout.rows):
+                layout.labels[index] = graph_label(plugin_id, pinned_names(pins), layout.margin)
+            current = self.current
+            self.current = plan_for(current.selected, current.added, current.removed)
+            self.show()
+
         def unpin(self, pin: dict) -> None:
             """PIN-05, PIN-13: stop loading the checkout, in this launch and the ones after it."""
             write_pins([p for p in read_pins() if p["path"] != pin["path"]])
             pins.remove(pin)
-            for index, plugin_id in enumerate(layout.rows):
-                layout.labels[index] = graph_label(plugin_id, pinned_names(pins), layout.margin)
             self.pin_choices.pop(pin["path"], None)
-            current = self.current
-            self.current = plan_for(current.selected, current.added, current.removed)
-            self.show()
+            self.repin()
             self.notify(f"unpinned {pin['plugin']} ({display(pin['path'])})", timeout=4)
+
+        def pin_row(self, plugin_id: str) -> None:
+            """PIN-17: a pinned plugin opens its pin; any other pins the checkout its name resolves to, or,
+            resolving to none, opens the folder browser."""
+            if self.offer(plugin_id):
+                self.push_screen(PinDialog(plugin_id))
+                return
+            try:
+                path = resolve_name(plugin_id.split("@")[0], clone_roots()).resolve()
+            except Unresolved as unresolved:
+                self.push_screen(FolderBrowser(plugin_id, str(unresolved)))
+                return
+            refused = self.pin_at(plugin_id, path)
+            if refused:
+                self.push_screen(FolderBrowser(plugin_id, refused))
+
+        def pin_at(self, plugin_id: str, path: Path) -> str | None:
+            """PIN-03, PIN-18: pin the checkout at path for the row's plugin, or say why not."""
+            name, held = plugin_id.split("@")[0], manifest_name(path)
+            if held is None:
+                return f"{display(path)} holds no plugin manifest (.claude-plugin/plugin.json); pick the plugin's folder."
+            if held != name:
+                return f"{display(path)} holds {held}, not {name}."
+            pin = new_pin(path.resolve(), name)
+            write_pins([*read_pins(), pin])
+            pins.append(pin)
+            self.repin()
+            self.notify(f"pinned {name} at {display(pin['path'])}", timeout=4)
+            return None
 
         def toggle_pin(self, plugin_id: str) -> None:
             offer = self.offer(plugin_id)
@@ -1683,7 +1806,7 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
                 self.show()
 
         def action_launch(self) -> None:
-            if isinstance(self.screen, PinDialog):
+            if isinstance(self.screen, (PinDialog, FolderBrowser)):
                 return
             current = self.current
             self.exit((current.selected, [(offer.pin, self.load(offer)) for offer in current.offered],

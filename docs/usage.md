@@ -91,6 +91,13 @@ and whether it loads. `enter` (or Unpin) unpins it for this launch and the ones
 after; the other buttons take the plugin out of this launch or put it in, and
 load the checkout or skip it for the installed copy. Escape or the ✕ closes it.
 
+`p` pins the plugin on the cursor's row, or opens its pin when it has one. rig
+pins the checkout it finds the way `rig pin <name>` does (below) without asking
+for a path; when it finds none, it opens a folder browser over your home folder.
+Move to the plugin's folder and press `p` or Pin this folder. A folder holding
+no plugin manifest, or another plugin's, is refused with the reason. A plugin
+in a subfolder of its repo is pinned at that subfolder.
+
 `e` opens the rig editor and brings you back to the picker when you quit it.
 `l`, Shift+Enter, or a click on the 🚀 at
 the right end of the footer launches; `q` cancels. Escape cancels too, unless a
@@ -224,12 +231,19 @@ rig unpin acme-widget          # bare `rig unpin` unpins the checkout you're in
 `claude plugin pin` and `claude plugin unpin` work the same way.
 
 Pinning by name looks the plugin up in your known marketplaces and expects its
-source repo cloned under a folder you name per host in `~/.rig/rigs.yml`:
+source repo cloned at `<folder>/<owner>/<repo>`, under a folder you name per
+host in `~/.rig/rigs.yml`:
 
 ```yaml
 clones:
   github.com: ~/src/github
 ```
+
+Without a `clones:` entry, rig learns the folder from your pins: one pin at
+`~/src/github/acme/widget`, whose `origin` is `github.com/acme/widget`, puts
+github.com's clones in `~/src/github`, so every plugin cloned beside it pins by
+name. When a name doesn't resolve, rig says why and you pin it by path. Tab
+after `rig pin` offers the names that resolve either way.
 
 At launch, a pin loads when the rig includes its plugin. A pin the rig doesn't
 include is offered in the picker, not loading, and left out with nobody at a

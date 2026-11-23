@@ -262,7 +262,10 @@ pin for the plugin it holds.
 
 #### `PIN-02`
 When `rig pin` is given a name that is not a path, the system shall resolve it
-to the local clone of that plugin's marketplace source repo.
+to the local clone of that plugin's marketplace source repo, found under the
+folder `clones:` in `~/.rig/rigs.yml` names for the repo's host, or, where it
+names none, under the folder an existing pin's checkout and its `origin` show
+that host's clones live in.
 
 #### `PIN-03`
 If a pin target holds no plugin manifest, then the system shall refuse the pin.
@@ -338,6 +341,22 @@ offers it as PIN-07 says.
 
 > Rationale: such a pin stands in for nothing, so pinning it can only mean
 > loading it: a plugin under development that no marketplace lists yet.
+
+#### `PIN-16`
+If `rig pin` can't resolve a name to a checkout, then the system shall refuse
+the pin, saying why and naming `rig pin <path>`.
+
+#### `PIN-17`
+When the user presses `p` on a plugin's row in the picker, the system shall
+open the pin's dialog for a pinned plugin, and for any other, pin the checkout
+its name resolves to as PIN-02 says, asking for no path, or, where it resolves
+to none, open a folder browser.
+
+#### `PIN-18`
+When the user pins a folder from the picker's folder browser, the system shall
+pin it for the row's plugin, refusing a folder that holds no plugin manifest or
+holds another plugin's and saying why, and close the browser on escape or a
+click on its ✕.
 
 ### `SANDBOX`
 Sandbox
@@ -533,7 +552,7 @@ nothing is named yet.
 
 #### `TAB-04`
 When the user completes an argument of `rig pin`, the system shall offer the
-marketplace plugins that resolve to a local clone and aren't pinned, along with
+marketplace plugins that resolve to a local clone as PIN-02 says and aren't pinned, along with
 directories.
 
 #### `TAB-05`

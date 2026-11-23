@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `p` in the `--select` picker pins the plugin on the cursor's row. rig pins
+  the checkout it finds without asking for a path, and when it finds none,
+  opens a folder browser so you can point at one. It refuses a folder that
+  holds no plugin, or a different plugin than the row's. Before, the picker
+  could unpin but never pin.
+- `rig pin <name>` finds clones without a `clones:` entry in
+  `~/.rig/rigs.yml`: an existing pin's checkout and its `origin` show where
+  that host's clones live. Tab after `rig pin` offers those names too, and a
+  name that still doesn't resolve says to pin it by path, `rig pin <path>`.
 - `rig setup` no longer crashes when the cursor reaches a rig whose rules name
   only files (`exists:`) and no `path:`. It crashed while titling the rig's
   plugin list.
