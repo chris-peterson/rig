@@ -253,6 +253,17 @@ take the rules it saved as an unsaved change and name them in the rig's box;
 if they don't parse or aren't rules, keep the rules as they were, say why, and
 open what the user wrote on the next `r`.
 
+#### `EDITOR-16`
+While a rig is selected, the rig editor shall show its rules, read-only, in a
+third box under its plugins, as YAML in the form the rig definitions file
+holds them, marked when they aren't saved yet, over the rig definitions file's
+path as a terminal hyperlink to the file.
+
+#### `EDITOR-17`
+When the rig definitions file changes outside the rig editor, the system shall
+take up the change if the editor has none unsaved, or else keep its own and
+say that saving would write over the change.
+
 ### `PIN`
 Local pins
 

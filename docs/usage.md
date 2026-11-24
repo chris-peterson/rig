@@ -217,6 +217,13 @@ the rig's box shows them; `s` writes them to `~/.rig/rigs.yml`. If what you wrot
 isn't valid, the editor says why and keeps the old rules, and the next `r` opens
 what you wrote so you can fix it.
 
+The box under the rig's plugins shows its rules as `rigs.yml` holds them, so
+you can browse them rig by rig, and says when they aren't saved yet. Under the
+rules is the path to `~/.rig/rigs.yml`, linked to the file: cmd+click it (or
+your terminal's equivalent) to edit the file directly. When the file changes
+on disk, the editor takes up the change; if the editor has unsaved changes of
+its own, it keeps them and warns that `s` would write over the file's.
+
 ## Pins
 
 A pin is a local checkout of a plugin that stands in for its installed copy, so

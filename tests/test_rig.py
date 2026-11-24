@@ -2001,6 +2001,76 @@ class Editor(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("nothing else", message)
                 self.assertEqual(app.screen.query_one("#plugins").border_title, "web")
 
+    def rules_box(self, app) -> tuple[str, str]:
+        """The rules box's title and its text."""
+        box = app.screen.query_one("#rules")
+        return box.border_title, str(box.content)
+
+    async def test_editor_16_rules_box_shows_the_rules_read_only_over_the_file(self):
+        config = three_rigs()
+        config["rigs"]["web"]["rules"] = [{"path": "~/src/web/", "exists": ["package.json"]}]
+        self.rig.save_config(config)
+        app, running = self.running(self.rig.RigEdits(self.rig.load_config(), self.NAMED, [], self.NAMED))
+        async with running as pilot:
+            await pilot.pause()
+            title, text = self.rules_box(app)
+            self.assertIn("base loads in every launch", text)
+            await pilot.press("down", "down")
+            await pilot.pause()
+            title, text = self.rules_box(app)
+            self.assertEqual(title, "rules")
+            self.assertEqual(text.splitlines(), ["- path: ~/src/web/", "  exists:", "  - package.json", "~/.rig/rigs.yml"])
+            link = app.screen.query_one("#rules").content.get_style_at_offset(app.console, len(text) - 1).link
+            self.assertEqual(link, (Path(self._tmp.name) / ".rig" / "rigs.yml").resolve().as_uri())
+            await pilot.press("up")
+            await pilot.pause()
+            self.assertIn("none: r adds them", self.rules_box(app)[1])
+
+    async def test_editor_16_rules_box_marks_rules_not_yet_saved(self):
+        app, running = self.running(self.existing())
+        editor = self.stand_in_editor("- path: ~/src/web/\n")
+        with unittest.mock.patch.dict(os.environ, {"GIT_EDITOR": editor}):
+            async with running as pilot:
+                await pilot.pause()
+                await pilot.press("down", "down", "r")
+                await pilot.pause()
+                title, text = self.rules_box(app)
+                self.assertEqual(title, "rules, unsaved")
+                self.assertIn("~/.rig/rigs.yml, once s writes it", text)
+                await pilot.press("s")
+                await pilot.pause()
+                self.assertEqual(self.rules_box(app)[0], "rules")
+
+    async def test_editor_17_a_change_to_the_file_is_taken_up(self):
+        self.rig.save_config(three_rigs())
+        app, running = self.running(self.rig.RigEdits(self.rig.load_config(), self.NAMED, [], self.NAMED))
+        async with running as pilot:
+            await pilot.pause()
+            config = three_rigs()
+            config["rigs"]["web"]["rules"] = [{"path": "~/src/web/"}]
+            self.rig.save_config(config)
+            app.screen.check_file()
+            await pilot.press("down", "down")
+            await pilot.pause()
+            self.assertEqual(self.rules_box(app)[1].splitlines()[0], "- path: ~/src/web/")
+
+    async def test_editor_17_unsaved_changes_are_kept_and_the_change_named(self):
+        self.rig.save_config(three_rigs())
+        app, running = self.running(self.rig.RigEdits(self.rig.load_config(), self.NAMED, [], self.NAMED))
+        async with running as pilot:
+            await pilot.pause()
+            await pilot.press("down", "d")
+            await pilot.pause()
+            config = three_rigs()
+            config["rigs"]["web"]["rules"] = [{"path": "~/src/web/"}]
+            self.rig.save_config(config)
+            app.screen.check_file()
+            await pilot.pause()
+            self.assertIn("changed outside the editor", [n.message for n in app._notifications][-1])
+            await pilot.press("down")
+            await pilot.pause()
+            self.assertIn("none: r adds them", self.rules_box(app)[1])
+
     async def test_editor_06_shows_what_a_plain_launch_loads(self):
         app, running = self.running(self.existing())
         async with running as pilot:

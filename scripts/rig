@@ -1958,6 +1958,11 @@ class RigEdits:
         self.dirty = self.first_run
         self.pinned = set(pinned)
         self.rule_drafts: dict[str, str] = {}
+        self.saved_rules = {name: list(rules) for name, rules in self.rules.items()}
+
+    def reload(self, config: dict) -> None:
+        """EDITOR-17: start over from the rig definitions as the file now holds them."""
+        self.__init__(config, self.enabled, self.groups, self.installed, self.pinned)
 
     def order(self) -> list[str]:
         """EDITOR-01: the base rig, the other rigs in alphabetical order, then full."""
@@ -2104,6 +2109,16 @@ class RigEdits:
             self.rules.pop(name, None)
         self.dirty = True
 
+    def rules_shown(self, name: str) -> str:
+        """EDITOR-16: the rig's rules as YAML, as the rig definitions file holds them, or why there are none."""
+        if name == BASE:
+            return f"{BASE} loads in every launch, so it takes no rules."
+        if name == FULL:
+            return f"{FULL} is every installed plugin; give rules to the rigs it holds."
+        if not (rules := self.rules.get(name)):
+            return "none: r adds them"
+        return yaml_module().safe_dump(rules, sort_keys=False, default_flow_style=False).rstrip("\n")
+
     def delete(self, name: str) -> None:
         """EDITOR-07."""
         self.fixed(name, "deleted")
@@ -2123,6 +2138,7 @@ class RigEdits:
         save_config({"default": [name for name in self.order() if name in self.default], "clones": self.clones,
                      "rigs": rigs, "dismissed": sorted(self.dismissed, key=plugin_order)})
         self.dirty = False
+        self.saved_rules = {name: list(rules) for name, rules in self.rules.items()}
 
 
 def text_editor() -> str:
@@ -2148,6 +2164,14 @@ def edit_text(text: str, name: str) -> str:
         if result.returncode != 0:
             raise Refused(f"{editor} exited with {result.returncode}, so the rules for {name} are as they were.")
         return path.read_text()
+
+
+def file_stamp(path: Path) -> int | None:
+    """EDITOR-17: when the file last changed, or None when there is none."""
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
 
 
 def open_edits() -> RigEdits:
@@ -2298,6 +2322,7 @@ def editor_app(edits: RigEdits):
                     yield PluginList(id="base-plugins")
                     yield Static("+", id="plus")
                     yield PluginList(id="plugins")
+                    yield Static(id="rules")
             yield Footer()
 
         def say(self, message: str, severity: str = "information") -> None:
@@ -2307,8 +2332,31 @@ def editor_app(edits: RigEdits):
 
         def on_mount(self) -> None:
             self.border_title = "rig setup"
+            self.stamp = file_stamp(rigs_file())
+            self.set_interval(1, self.check_file)
             self.rebuild()
             self.query_one("#rigs", Tree).focus()
+
+        def check_file(self) -> None:
+            """EDITOR-17: take up a change made to the rig definitions file outside the editor, or, with changes
+            of its own unsaved, say that saving would write over it."""
+            path = rigs_file()
+            if (stamp := file_stamp(path)) == self.stamp:
+                return
+            self.stamp = stamp
+            if edits.dirty:
+                self.say(f"{display(path)} changed outside the editor; s would write over that change.",
+                         severity="warning")
+                return
+            try:
+                config = load_config()
+            except SystemExit as refused:
+                self.say(f"{refused.code}", severity="error")
+                return
+            if config is not None:
+                edits.reload(config)
+                self.rebuild()
+                self.say(f"Took up the change to {display(path)}")
 
         def entries(self) -> list[tuple[tuple[str, str | int], Text]]:
             """EDITOR-01: the base rig at the top, the other rigs, the drafts under a suggestions heading, and full at
@@ -2353,9 +2401,31 @@ def editor_app(edits: RigEdits):
                     tree.move_cursor(node)
                     return
 
+        def show_rules(self) -> None:
+            """EDITOR-16: the selected rig's rules, read-only, over a link to the rig definitions file."""
+            box = self.query_one("#rules", Static)
+            kind, key = self.current
+            box.display = kind == "rig"
+            if kind != "rig":
+                return
+            text = Text(edits.rules_shown(key), style="" if edits.rules.get(key) else MUTED)
+            if key in edits.rule_drafts:
+                text.append("\nwhat r last saved doesn't hold, so these are as they were; r opens it", style=WARN)
+            path = rigs_file()
+            text.append("\n")
+            if path.exists():
+                text.append(display(path), style=f"underline {MUTED} link {path.resolve().as_uri()}")
+            else:
+                text.append(f"{display(path)}, once s writes it", style=MUTED)
+            box.update(text)
+            changed = key not in BUILT_IN and edits.rules.get(key) != edits.saved_rules.get(key)
+            box.border_title = "rules, unsaved" if changed else "rules"
+            box.border_subtitle = "" if key in BUILT_IN else "r edits"
+
         def show_plugins(self, keep: str | None = None) -> None:
             """EDITOR-04: a rig other than base shows the base rig's plugins in a box of their own, then `+`, then
             its own box."""
+            self.show_rules()
             listing = self.query_one("#plugins", SelectionList)
             base_box = self.query_one("#base-plugins", SelectionList)
             highlighted = listing.highlighted
@@ -2553,6 +2623,8 @@ def editor_app(edits: RigEdits):
 
         def save(self) -> None:
             edits.save()
+            self.stamp = file_stamp(rigs_file())
+            self.show_rules()
             self.say(f"Saved to {display(rigs_file())}")
 
         def action_leave(self) -> None:
@@ -2579,6 +2651,7 @@ def editor_app(edits: RigEdits):
         #base-plugins { height: auto; max-height: 50%; border: round $border-blurred; }
         #plus { height: 1; width: 100%; content-align: center middle; color: $text-muted; }
         #plugins { height: 1fr; border: round $border-blurred; }
+        #rules { height: auto; max-height: 40%; border: round $border-blurred; padding: 0 1; }
         #rigs:focus-within, #plugins:focus, #base-plugins:focus { border: round $border; }
         RigDialog, SaveOnQuit { align: center middle; }
         #dialog { width: 60; height: auto; max-height: 80%; border: round $border; background: $surface; padding: 1 2; }

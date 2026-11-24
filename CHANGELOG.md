@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `rig setup` shows the selected rig's rules in a box under its plugins, as
+  `~/.rig/rigs.yml` holds them, so you can browse them without opening an
+  editor. Under them, the file's path is a link: cmd+click it to edit the file
+  directly, and the editor takes up what you save there, unless it has unsaved
+  changes of its own, which it keeps and warns about.
 - A launch with arguments, including plain `claude`, no longer opens the
   picker on its own when it has a plugin to install or a pin to choose. It
   installs what the rigs need and loads each pin as the picker would have
