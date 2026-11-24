@@ -1,4 +1,7 @@
 - [Home](/)
-- [Using rig](/usage)
-- Reference
+- [Getting started](/getting-started)
+- [Rigs](/rigs)
+- [Pins](/pins)
+- [Reference](/reference)
+- Specification
   - [SPEC](/spec)

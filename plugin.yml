@@ -4,11 +4,11 @@
 
 name: rig
 version: 0.5.0
-description: "Launch Claude Code with a named set of plugins, your local plugin checkouts pinned in, and the sandbox when you want it."
+description: "Switch Claude Code between named groups of plugins, and pin your local plugin checkouts in while you develop them."
 author: chris-peterson
 repository: https://github.com/chris-peterson/rig
 icon: .claude-plugin/icon.svg
-keywords: [plugins, launcher, sandbox, local-development, claude-code]
+keywords: [plugins, launcher, context, local-development, plugin-development, claude-code]
 license: MIT
 
 validate:
@@ -30,7 +30,7 @@ suite:
   group: passage
   gloss: "rig: pick the plugins for the job."
   pitch: "Different work, different plugins? Name the set once and launch with it."
-  what: "A rig is a named set of plugins chosen for a kind of work. rig launches Claude Code with the rig you name, loads the plugin checkouts you've pinned so your edits take effect without a release, and turns on the sandbox for a launch that asks for it."
+  what: "A rig is a named group of plugins chosen for a kind of work. Every session loads only the rigs it needs: the ones you name, or the ones whose folder rules match where you launch, so plugins for other work stay out of its context. /rig switches a running session to other rigs and keeps the conversation. Pin a local plugin checkout and it stands in for the installed copy, so your edits take effect without a release."
   # >>> shipyard:describe — generated from source by `shipyard gen-describe`; do not edit >>>
   describe:
     hooks:

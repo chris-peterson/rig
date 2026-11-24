@@ -1,7 +1,7 @@
 # rig
 
-Launch Claude Code with a named set of plugins, your local plugin checkouts
-pinned in, and the sandbox when you want it.
+Switch Claude Code between named groups of plugins, and pin your local plugin
+checkouts in while you develop them.
 
 → **[Docs](https://chris-peterson.github.io/rig)**
 

@@ -1,7 +1,7 @@
 {
   "name": "rig",
   "version": "0.5.0",
-  "description": "Launch Claude Code with a named set of plugins, your local plugin checkouts pinned in, and the sandbox when you want it.",
+  "description": "Switch Claude Code between named groups of plugins, and pin your local plugin checkouts in while you develop them.",
   "author": {
     "name": "chris-peterson"
   },
@@ -10,8 +10,9 @@
   "keywords": [
     "plugins",
     "launcher",
-    "sandbox",
+    "context",
     "local-development",
+    "plugin-development",
     "claude-code"
   ],
   "homepage": "https://chris-peterson.github.io/rig/#/",

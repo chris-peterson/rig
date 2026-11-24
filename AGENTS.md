@@ -21,6 +21,7 @@ just check            # claude plugin validate, as the projection job runs it
 just generate         # regenerate plugin.json and docs/ from plugin.yml and the sources
 just check-generated  # generate, then show what it wrote
 just docs             # render the docsify site and serve it locally
+just screenshots      # re-render docs/resources/ after a change to the picker or editor
 ```
 
 The recipes run shipyard straight from its git ref via `uvx`, so there is
@@ -39,8 +40,9 @@ hooks/hooks.yml          hook source; cli-freshness.sh reports a stale `rig` on 
                          beacon-badge.sh puts the rigs on beacon's pane badge
 tests/                   unittest suite; a test covering a requirement names its ID
 dev/demo.py              what `just demo` runs
+dev/screenshots.py       what `just screenshots` runs: the docs' SVGs of the picker and editor
 SPEC.md / STATUS.md      rig's requirements and their coverage
-docs/                    docsify site; the tracked pages and sidebar are source
+docs/                    docsify site; the tracked pages, resources, and sidebar are source
 ```
 
 `.claude-plugin/plugin.json`, `hooks/hooks.json`, `plugin.yml`'s

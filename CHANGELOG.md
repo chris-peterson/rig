@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **rig 1.0.** The [docs](https://chris-peterson.github.io/rig) are rewritten
+  around what rig is for: switching Claude Code between groups of plugins, so
+  each session loads only the plugins its work needs. The home page says why
+  that matters, *Getting started* walks through installing and the first
+  launch, *Rigs* covers shaping rigs, folder rules, and switching mid-session,
+  *Pins* covers developing plugins against a local checkout, and *Reference*
+  holds the commands, the keys, and the `~/.rig/rigs.yml` format. The pages
+  show the picker and the rig editor as they look in a terminal. *Using rig*
+  is gone; its content is spread across these pages.
 - `rig setup` shows the selected rig's rules in a box under its plugins, as
   `~/.rig/rigs.yml` holds them, so you can browse them without opening an
   editor. Under them, the file's path is a link: cmd+click it to edit the file

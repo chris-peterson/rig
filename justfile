@@ -68,3 +68,8 @@ generate:
 check-generated:
     {{shipyard}} generate
     git --no-pager diff --stat
+
+# render the picker and the rig editor to docs/resources/*.svg, in rig's Dracula theme
+[group('utilities')]
+screenshots:
+    @uv run --quiet --with pyyaml --with textual python dev/screenshots.py
