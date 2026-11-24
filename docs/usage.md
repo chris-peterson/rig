@@ -16,7 +16,9 @@ behind, a session start tells you to run `/rig:install-rig` again.
 
 `claude` with no arguments launches your default rigs. `rig` with no arguments
 opens the `--select` picker on them, so you can change what loads before the
-launch; with no rigs yet, first-run setup comes first.
+launch; with no rigs yet, first-run setup comes first. Any launch with
+arguments, `claude` included, goes straight to Claude Code unless it passes
+`--select`.
 
 **Adopting rig turns off the plugins your Claude Code settings enable.** Every
 launch sets each plugin `~/.claude/settings.json` enables to off, so a session
@@ -69,7 +71,7 @@ launches, and refuses with nobody at a terminal to answer.
 `--select` opens a picker before the launch: the `rig list --graph` table with
 `full` added, the rigs across the top and their plugins down the side, a 📌 in
 front of each pinned plugin. One cursor sits on a rig's name or a plugin's row;
-the arrow keys and tab move it, and space or enter toggles what it's on. A click
+the arrow keys, `h`/`j`/`k`/`l`, and tab move it, and space or enter toggles what it's on. A click
 anywhere in a rig's column toggles the rig, and a click on a plugin's name
 toggles the plugin.
 A ✓ under a rig's name means the launch loads it (the legend in the graph's
@@ -99,7 +101,7 @@ no plugin manifest, or another plugin's, is refused with the reason. A plugin
 in a subfolder of its repo is pinned at that subfolder.
 
 `e` opens the rig editor and brings you back to the picker when you quit it.
-`l`, Shift+Enter, or a click on the 🚀 at
+`g` (Go), Shift+Enter, or a click on the 🚀 at
 the right end of the footer launches; `q` cancels. Escape cancels too, unless a
 message is showing: then the first escape just closes the message. `TEXTUAL_ANIMATIONS=none`
 holds the 🚀's exhaust still. `rig use web --select` starts the picker with
@@ -117,7 +119,7 @@ your rigs.
 
 `rig setup` opens the rig editor: your rigs on the left, from `base` at the
 top to `full` at the bottom, and the selected rig's plugins on the right. Move
-with the arrow keys or the mouse, and toggle a plugin with space or a click.
+with the arrow keys, `j`/`k`, or the mouse, and toggle a plugin with space or a click.
 `base` and `full` are built in: they can't be renamed or deleted, and `full`
 can't be edited. Every other rig shows as two boxes, `base` + the rig: toggle
 a plugin in the `base` box and it moves down into the rig. `>` does the same
@@ -151,8 +153,8 @@ is a draft.
 | `escape` | close the message on show |
 
 A rig names plugins as `<plugin>@<marketplace>`. When a rig names one that
-isn't installed, the picker opens first (below) and marks it, and launching
-installs it first. With nobody at a terminal to confirm, the launch is refused.
+isn't installed, launching at a terminal installs it first, and the picker
+marks it when you open one. With nobody at a terminal, the launch is refused.
 
 Everything rig doesn't recognize goes to Claude Code unchanged. Claude Code's
 own subcommands (`claude plugin list`, `claude mcp`) run without a rig.
@@ -246,8 +248,7 @@ name. When a name doesn't resolve, rig says why and you pin it by path. Tab
 after `rig pin` offers the names that resolve either way.
 
 At launch, a pin loads when the rig includes its plugin. A pin the rig doesn't
-include is offered in the picker, not loading, and left out with nobody at a
-terminal. A pin with no installed copy is different: it stands in for nothing,
+include is left out, and offered in the picker not loading. A pin with no installed copy is different: it stands in for nothing,
 so pinning it can only mean loading it. That's a plugin you're writing, one no
 marketplace lists yet. It loads in every launch without asking, offered selected
 in the picker in case you want to leave it out, and the launch summary marks it
@@ -275,16 +276,16 @@ fixed.
 `/rig` opens the picker inside the session: the same graph as
 `--select`, set to what the session loads now, with the same keys for rigs,
 plugins, and pins. A toast names the pin that holds the folder you're in, if
-one does, and whether its checkout loads. `l` switches and `escape` or `q`
-closes it without one. `/rig web infra` skips the picker and switches
+one does, and whether its checkout loads. The footer's `h` `j` `k` `l` buttons
+move as the arrow keys do, `g` (Go) switches, and `escape` or `q` closes it without
+one. `/rig web infra` skips the picker and switches
 to the rigs you name.
 
 A session can't change its plugins while it runs, so the switch happens across
 a restart that keeps the conversation: rig records the switch, Claude Code
 exits on its own, and rig relaunches the same conversation with what you
 chose. The relaunch adds nothing to the conversation: a toast names the rigs it
-switched to, and the session waits for your next prompt. A switch from the picker doesn't ask again. One that names rigs opens
-the picker first when they leave pins to choose. The sandbox stays as the
+switched to, and the session waits for your next prompt. Neither kind of switch opens the picker again on the relaunch. The sandbox stays as the
 session had it, and so do the options you passed to Claude Code, such as
 `--plugin-dir` or `--model`. The prompt doesn't carry over, and neither does an
 option that picks or starts a conversation (`--continue`, `--resume`,
@@ -310,12 +311,14 @@ to keep them that way.
 
 ## What a launch shows
 
-When a launch has something to decide (a plugin to install, or a pin the rigs
-don't settle), rig opens the `--select` picker first, with a toast saying why:
-the pin that holds this folder and whether its checkout loads, a pin the rigs
-leave out that has an installed copy, the plugins that install at launch. The cursor starts on that pin's
-row, and `enter` there opens its choices. `l` launches, `q` cancels. A launch
-with nothing to decide skips the picker.
+A launch with arguments never opens the picker on its own: plugins the rigs
+need are installed, a pin holding this folder loads, and a pin the rigs leave
+out stays out, as the summary below shows. When the picker does open, on `rig`
+alone or `--select`, and the launch has something to decide (a plugin to
+install, or a pin the rigs don't settle), a toast says what: the pin that holds
+this folder and whether its checkout loads, a pin the rigs leave out that has an
+installed copy, the plugins that install at launch. The cursor starts on that
+pin's row, and `enter` there opens its choices. `g` (Go) launches, `q` cancels.
 
 Before Claude Code starts, rig prints the rigs, the pins, and the sandbox
 state:

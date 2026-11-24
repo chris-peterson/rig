@@ -73,9 +73,9 @@ marking the base rig and the default rigs, and naming the rule that makes a rig
 a default in the working directory.
 
 #### `RIG-08`
-If a rig names a plugin that is not installed, then the system shall mark it
-in the picker, install it once the user launches, and refuse the launch if the
-user cancels.
+If a rig names a plugin that is not installed, then the system shall install
+it once an interactive launch goes ahead; where the picker is open, it shall
+mark the plugin there and refuse the launch if the user cancels.
 
 #### `RIG-09`
 If a rig names a plugin that is not installed and no one is at a terminal to
@@ -192,8 +192,8 @@ names, as a candidate for the selected rig, and show `full` with every
 installed plugin locked.
 
 #### `EDITOR-03`
-The rig editor shall move through rigs and plugins with the arrow keys or the
-mouse, and toggle the highlighted plugin with space or a click.
+The rig editor shall move through rigs and plugins with the arrow keys, `j`
+and `k`, or the mouse, and toggle the highlighted plugin with space or a click.
 
 #### `EDITOR-04`
 The rig editor shall show every rig other than the base rig as the base rig's
@@ -284,7 +284,7 @@ space, with when each was pinned.
 
 #### `PIN-07`
 When an interactive launch starts inside a pinned checkout, the system shall
-offer that pin in the picker, loading. When a launch loading a pin starts inside
+load that pin, and offer it in the picker loading. When a launch loading a pin starts inside
 its checkout or in a folder above it, the system shall mark the pin ❗ in place
 of 📌 in the picker and its legend, warn in the pin's dialog that the session
 runs on the files it edits, and offer to skip the checkout for that launch
@@ -296,8 +296,8 @@ checkout in place of the installed copy.
 
 #### `PIN-09`
 When an interactive launch's rigs do not include a pinned plugin that has a
-copy installed for the working directory, the system shall offer that pin in
-the picker, not loading.
+copy installed for the working directory, the system shall leave that pin out,
+and offer it in the picker not loading.
 
 #### `PIN-10`
 If a launch's rigs do not include a pinned plugin that has a copy installed
@@ -389,12 +389,14 @@ When the first argument is a Claude Code subcommand, the system shall run
 Claude Code with the arguments unchanged, without loading a rig.
 
 #### `LAUNCH-05`
-When an interactive launch has a plugin to install or a pin to choose, the
-system shall open the picker as `--select` does, with its cursor on the first
-pin to choose, else the first plugin to install, and a notice naming each: a
-pin that holds the working directory and whether its checkout loads, a pin the
-rigs leave out that has an installed copy, and the plugins that install at
-launch.
+When an interactive launch has arguments and no `--select`, the system shall
+launch without the picker, whatever it has to install or pins to choose, each
+pin loading as the picker would offer it. When the picker opens on a launch
+with a plugin to install or a pin to choose, it shall start with its cursor on
+the first pin to choose, else the first plugin to install, and a notice naming
+each: a pin that holds the working directory and whether its checkout loads, a
+pin the rigs leave out that has an installed copy, and the plugins that install
+at launch.
 
 #### `LAUNCH-06`
 While an interactive launch runs, the system shall stay running until Claude
@@ -403,13 +405,14 @@ exit status.
 
 #### `LAUNCH-07`
 Where a launch passes `--select`, the system shall first show a picker headed
-with the command line that opened it: the plugins against the rigs as
+`rig select` with the command line that opened it: the plugins against the rigs as
 `rig list --graph` shows them, with `full` among the rigs, each row on one line,
 marking under each rig whether the launch loads it whole or in part, with one
-cursor on a rig's name or a plugin's row that the arrow keys and tab move,
+cursor on a rig's name or a plugin's row that the arrow keys, `h`, `j`, `k`,
+`l`, and tab move,
 toggling what the cursor is on with space or enter, a rig other than the base
 rig toggling on a click on its name or anywhere in its column, a plugin
-toggling on a click on its name, launching on `l`,
+toggling on a click on its name, launching on `g`,
 Shift+Enter, or a click on the footer's 🚀, and refusing the launch on `q`.
 
 #### `LAUNCH-09`
@@ -437,7 +440,7 @@ When a launch's rigs include `full`, the system shall describe it as all of its
 plugins, naming the ones taken out, in place of the rigs.
 
 #### `LAUNCH-13`
-The picker shall end its footer with a 🚀 launch item, animated unless
+The picker shall end its footer with a `g Go` 🚀 launch item, animated unless
 Textual's animations are off, that launches on a click.
 
 #### `LAUNCH-14`
@@ -489,8 +492,9 @@ When the user runs `/rig` naming no rig in a session rig launched at a
 terminal, the system shall open a pane with the picker's graph, set to the
 rigs, plugins, and pins the session loads, toggling them as the picker does,
 with a toast ending in ✕ naming each pin that holds the working directory and
-whether its checkout loads; it shall record the switch and exit Claude Code on
-`l`, or, when the picks are what the session already loads, close and keep the
+whether its checkout loads, and `h`, `j`, `k`, and `l` buttons that move its
+cursor as the arrow keys move the picker's; it shall record the switch and exit Claude Code on
+`g`, or, when the picks are what the session already loads, close and keep the
 session, and close without a switch on escape or `q`. The pane shall name each
 plugin without its marketplace unless two rows share the name, stagger the rig
 names over as few rows as fit when the pane is too narrow for them on one, and

@@ -1,7 +1,7 @@
 import type { EngineInterface, On, ProcessRunResult } from 'claude-code'
 
 import * as Model from './switch/model'
-import { KEYS, paneView, type PaneModel } from './switch/view'
+import { type Direction, KEYS, paneView, type PaneModel } from './switch/view'
 
 /** The slash command: `/rig` opens the picker, `/rig <rig>...` switches at once. */
 export const COMMAND = 'rig'
@@ -42,12 +42,56 @@ function openOf(state: Model.State) {
 /** The open pane's model, and the session it switches: one session per process. */
 let pane: PaneModel | null = null
 let sessionId = ''
+/** The rig name the cursor last sat on, where k from the first plugin row goes back to. */
+let lastRig: string | null = null
 
 /** rig, run from this plugin's checkout as the skill it replaces ran it. */
 function rig($: EngineInterface, args: readonly string[]): Promise<ProcessRunResult> {
   return $.process.run(['uv', 'run', '--quiet', '--script', `${$.plugin.root}/scripts/rig`, ...args], {
     timeoutMs: RIG_TIMEOUT_MS,
   })
+}
+
+/** The footer's hjkl buttons: the ring landing on one, by a click or Tab, leaves the cursor where it was. */
+const NAV_KEYS: readonly string[] = [KEYS.LEFT, KEYS.DOWN, KEYS.UP, KEYS.RIGHT]
+
+/**
+ * Where hjkl takes the cursor from `focus`, as the arrows take rig's picker: j and k down the plugin rows to the
+ * footer and up from the first into the rig names (back to `rig`, the one it last sat on); h and l across the rigs,
+ * base aside, the first press from anywhere else going up to them. Null where it stays.
+ */
+export function stepOf(state: Model.State, focus: string | null, rig: string | null, direction: Direction): string | null {
+  const graph = Model.graphOf(state)
+  const rows = graph.rows.map(KEYS.pluginOf)
+  const rigs = graph.rigs.slice(1).map(each => KEYS.rigOf(each.name))
+  const top = rig !== null && rigs.includes(rig) ? rig : (rigs[0] ?? null)
+  const at = focus === null ? -1 : rows.indexOf(focus)
+  const column = focus === null ? -1 : rigs.indexOf(focus)
+
+  if (direction === 'left' || direction === 'right') {
+    if (column < 0) {
+      return top
+    }
+
+    const to = rigs[column + (direction === 'right' ? 1 : -1)]
+
+    return to ?? null
+  }
+
+  const step = direction === 'down' ? 1 : -1
+
+  if (at >= 0) {
+    const to = at + step
+
+    return to < 0 ? top : to >= rows.length ? KEYS.SWITCH : (rows[to] ?? null)
+  }
+
+  if (focus === KEYS.SWITCH || focus === KEYS.CANCEL) {
+    return step < 0 ? (rows.at(-1) ?? top) : null
+  }
+
+  // On a rig's name, or nowhere yet: j goes down into the plugins, k stays.
+  return step > 0 ? (rows[0] ?? KEYS.SWITCH) : null
 }
 
 /** Ends the session once the hook that asked has returned: rig, Claude Code's parent, relaunches it. */
@@ -80,6 +124,24 @@ function actionsOf($: EngineInterface) {
       if (pane) {
         update(Model.toggleRig(pane.state, pane.picks, name), KEYS.rigOf(name))
       }
+    },
+    move: async (direction: Direction) => {
+      if (!pane || pane.dialog) {
+        return
+      }
+
+      const to = stepOf(pane.state, pane.focus, lastRig, direction)
+
+      if (to === null) {
+        return
+      }
+
+      pane = { ...pane, focus: to }
+
+      return $.ui.focus({ requestId: PANE_ID, key: to }).then(
+        () => undefined,
+        () => undefined,
+      )
     },
     activate: (pluginId: string) => {
       if (!pane) {
@@ -216,12 +278,13 @@ function isUnchanged(text: string): boolean {
 
 /**
  * SWITCH-01..05 in the session: `/rig` opens rig's picker in a pane over the
- * session's rigs, plugins and pins; `l` records the choice with `rig switch
+ * session's rigs, plugins and pins; the arrows, tab and hjkl move its cursor; `g` records the choice with `rig switch
  * --picks` and ends the session, and rig relaunches the conversation with it.
  */
 export function register(on: On): void {
   pane = null
   sessionId = ''
+  lastRig = null
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -286,6 +349,7 @@ export function register(on: On): void {
     const picks = Model.initialPicks(state)
 
     pane = { state, picks, dialog: null, focus: null }
+    lastRig = null
 
     await $.ui.open(openOf(state))
 
@@ -331,7 +395,8 @@ export function register(on: On): void {
   on('ui.focus', { requestId: PANE_ID }, async ($, e, next) => {
     const result = await next(e)
 
-    if (pane && e.element) {
+    if (pane && e.element && !NAV_KEYS.includes(e.element)) {
+      lastRig = e.element.startsWith(KEYS.rigOf('')) ? e.element : lastRig
       pane = { ...pane, focus: e.element }
       void $.ui.scroll({ in: PANE_ID, to: { key: e.element } }).catch(() => undefined)
     }

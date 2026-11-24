@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
+import { stepOf } from '../hooks/switch'
 import * as Model from '../hooks/switch/model'
 import { PANE, SESSION, SESSION_ID, STATE, commandOf, textOf, worldOf } from './fixtures/switch-world'
 
@@ -87,7 +88,7 @@ describe('switch', () => {
     expect(drawn).toContain('📌 rig')
     expect(drawn).not.toContain('rig@cp')
     expect(drawn).toContain('★web')
-    expect(drawn).toContain('Switch 🚀')
+    expect(drawn).toContain('Go 🚀')
   })
 
   test('SWITCH-05: a pane too narrow for the rig names across staggers them over rows', async ($, on) => {
@@ -121,6 +122,38 @@ describe('switch', () => {
     expect(textOf(drawn)).toContain('+ splunk')
     expect(textOf(drawn)).toContain('- 📌 rig, beacon')
     expect(JSON.stringify(drawn)).toContain('#ff5555')
+  })
+
+  test('SWITCH-05: hjkl move the cursor as the arrows move the picker’s, and g switches', async ($, on) => {
+    worldOf(on)
+
+    await $.session.start(SESSION)
+    await $.command.run(commandOf())
+
+    const drawn = textOf(await $.ui.render(PANE))
+
+    expect(drawn).toContain('←↓↑→Go 🚀Cancel')
+    expect(drawn).toContain('arrows hjkl tab move')
+    expect(drawn).toContain('g goes')
+
+    const rows = Model.graphOf(STATE).rows.map(row => `plugin:${row}`)
+    const first = rows[0] ?? ''
+    const last = rows.at(-1) ?? ''
+
+    expect(stepOf(STATE, null, null, 'down')).toBe(first)
+    expect(stepOf(STATE, 'rig:web', 'rig:web', 'down')).toBe(first)
+    expect(stepOf(STATE, 'rig:web', 'rig:web', 'up')).toBeNull()
+    expect(stepOf(STATE, first, 'rig:web', 'down')).toBe(rows[1] ?? '')
+    expect(stepOf(STATE, first, 'rig:web', 'up')).toBe('rig:web')
+    expect(stepOf(STATE, first, null, 'up')).toBe('rig:ops')
+    expect(stepOf(STATE, last, null, 'down')).toBe('switch')
+    expect(stepOf(STATE, 'cancel', null, 'up')).toBe(last)
+    expect(stepOf(STATE, 'switch', null, 'down')).toBeNull()
+    expect(stepOf(STATE, 'rig:ops', null, 'right')).toBe('rig:web')
+    expect(stepOf(STATE, 'rig:web', null, 'left')).toBe('rig:ops')
+    expect(stepOf(STATE, 'rig:ops', null, 'left')).toBeNull()
+    expect(stepOf(STATE, 'rig:full', null, 'right')).toBeNull()
+    expect(stepOf(STATE, first, 'rig:web', 'right')).toBe('rig:web')
   })
 
   test('LAUNCH-09: choosing full takes the other rigs away, and a rig takes full away', async ($, on) => {

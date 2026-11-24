@@ -476,7 +476,7 @@ def overlay(rig_ids: list[str], pinned: set[str], known: set[str], sandbox: bool
 
 
 def install(plugins: list[str]) -> None:
-    """RIG-08: install the plugins the user confirmed the launch with."""
+    """RIG-08: install the plugins the launch needs, once the user at the terminal launches."""
     for plugin in plugins:
         if subprocess.run(["claude", "plugin", "install", plugin]).returncode != 0:
             fail(f"`claude plugin install {plugin}` failed; launch refused.")
@@ -594,7 +594,7 @@ def picked(picks: dict | None) -> tuple[list[str], list[str]]:
 
 
 def confirmation(current: Plan, rows: list[str]) -> tuple[str, str | None]:
-    """LAUNCH-05: why the picker opened unasked, one line for each pin left to choose and one for the plugins
+    """LAUNCH-05: what the picker leaves open for the launch, one line for each pin left to choose and one for the plugins
     that install, and the row to put the cursor on: the first pin, else the first plugin to install."""
     lines, rows_named = [], []
     for offer in current.offered:
@@ -610,7 +610,7 @@ def confirmation(current: Plan, rows: list[str]) -> tuple[str, str | None]:
     if current.missing:
         lines.append(f"installs at launch: {', '.join(current.missing)}")
         rows_named += [row for row in rows if row in current.missing]
-    lines.append("Enter on a row changes it; l launches, q cancels.")
+    lines.append("Enter on a row changes it; g goes, q cancels.")
     return "\n".join(lines), next((row for row in rows_named if row), None)
 
 
@@ -639,17 +639,18 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
             fail(f"{label(selected)} names plugins that aren't installed: {', '.join(current.missing)}. "
                  "Install them with `claude plugin install <plugin>`, or launch at a terminal to be asked.")
         chosen = [(offer.pin, offer.unasked) for offer in current.offered]
-    elif select or current.missing or any(not offer.settled for offer in current.offered):
+    elif select:
         plan_for = lambda names, *more: plan(names, rigs, installed, pins, cwd, *more)
         notice, focus = "", None
+        unsettled = bool(current.missing) or any(not offer.settled for offer in current.offered)
         while True:
             everything = sorted(installed, key=str.casefold)
             here = default_rigs(config, cwd)
             columns = [{"name": name, "default": name in here,
                         "plugins": everything if name == FULL else rigs[name]["plugins"]} for name in rig_order(rigs)]
-            if not select:
+            if unsettled:
                 notice, focus = confirmation(current, graph_of(columns, everything, pins).rows)
-                select = True
+                unsettled = False
             answer = run_app(select_app(plan_for, columns, everything, pins, current, sandbox_flag, invocation(),
                                         notice, focus))
             if answer is None or answer[0] != EDIT:
@@ -1318,8 +1319,8 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
                title: str = f"{PROG} --select", notice: str = "", focus: str | None = None):
     """LAUNCH-07..11: pick the rigs on the graph `rig list --graph` prints, `full` among them. One cursor sits
     on a rig's name or a plugin's row, and space, enter, or a click toggles what it's on: a rig (`full` alone)
-    or a plugin, a pinned one opening its pin. p pins a plugin (PIN-17), e opens the rig editor, and l or the 🚀 launches. The header is the command line that opened it.
-    LAUNCH-05: opened unasked, it shows the notice saying why and starts with the cursor on the focus row. Exits with (the rigs, each pin and
+    or a plugin, a pinned one opening its pin. p pins a plugin (PIN-17), e opens the rig editor, and g or the 🚀 goes. The title names the mode, `rig select`, over the command line that opened it.
+    LAUNCH-05: with a pin to choose or a plugin to install, it shows the notice naming each and starts with the cursor on the focus row. Exits with (the rigs, each pin and
     whether to load it, the plugins picked, the plugins taken out), or (EDIT, the rigs, picked, taken out), or
     None when cancelled."""
     from rich.text import Text
@@ -1349,7 +1350,9 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
         """The graph, with one cursor: on a rig's name (row RIGS) or on a plugin's row, where a click would land."""
 
         BINDINGS = [Binding("up", "move(-1)", show=False), Binding("down", "move(1)", show=False),
+                    Binding("k", "move(-1)", show=False), Binding("j", "move(1)", show=False),
                     Binding("left", "across(-1)", show=False), Binding("right", "across(1)", show=False),
+                    Binding("h", "across(-1)", show=False), Binding("l", "across(1)", show=False),
                     Binding("tab", "cycle(1)", show=False), Binding("shift+tab", "cycle(-1)", show=False),
                     Binding("space", "activate", "Toggle"), Binding("enter", "activate", show=False),
                     Binding("p", "pin", "Pin"), Binding("e", "edit", "Edit rigs")]
@@ -1413,7 +1416,7 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
             self.refresh()
 
         def action_across(self, step: int) -> None:
-            """Left and right move across the rigs, base aside; from a plugin, the first press goes up to them."""
+            """Left and right, h and l, move across the rigs, base aside; from a plugin, the first press goes up to them."""
             if self.row == RIGS:
                 self.column = max(1, min(len(names) - 1, self.column + step))
             self.row = RIGS
@@ -1495,7 +1498,7 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
 
         def render(self) -> Text:
             lit = self.lit
-            return Text.assemble((" l ", "bold"), "Launch ", (">" * lit, f"bold {DRACULA['background']}"),
+            return Text.assemble((" g ", "bold"), "Go ", (">" * lit, f"bold {DRACULA['background']}"),
                                  (">" * (COUNTDOWN_CELLS - lit), MUTED), " 🚀 ")
 
         @property
@@ -1621,7 +1624,7 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
         TITLE = "rig"
         LAYOUT = layout
         ENABLE_COMMAND_PALETTE = False
-        BINDINGS = [Binding("l", "launch", "Launch", show=False), Binding("shift+enter", "launch", show=False),
+        BINDINGS = [Binding("g", "launch", "Go", show=False), Binding("shift+enter", "launch", show=False),
                     Binding("q", "cancel", "Cancel"), Binding("escape", "escape", show=False)]
         CSS = f"""
         Screen.picker {{ border: round $border; border-title-align: center; border-title-color: $text; }}
@@ -1665,7 +1668,8 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
 
         def on_mount(self) -> None:
             self.screen.add_class("picker")
-            self.screen.border_title = title
+            self.screen.border_title = f"{PROG} select"
+            self.screen.border_subtitle = title
             picker = self.query_one(Picker)
             if focus in layout.rows:
                 picker.row = layout.rows.index(focus)
@@ -2222,9 +2226,10 @@ def editor_app(edits: RigEdits):
             self.dismiss(choice)
 
     class PluginList(SelectionList):
-        """One box of plugins, naming space in the footer; the arrow keys carry on into the box above or below."""
+        """One box of plugins, naming space in the footer; the arrow keys and j/k carry on into the box above or below."""
 
-        BINDINGS = [Binding("space", "select", "Toggle"), Binding("enter", "nothing", show=False)]
+        BINDINGS = [Binding("space", "select", "Toggle"), Binding("enter", "nothing", show=False),
+                    Binding("j", "cursor_down", show=False), Binding("k", "cursor_up", show=False)]
 
         def action_nothing(self) -> None:
             """Enter toggles in a plain SelectionList; here space alone does."""
@@ -2253,7 +2258,8 @@ def editor_app(edits: RigEdits):
     class RigList(Tree):
         """The rigs pane: a click selects a rig, and a double-click opens it for editing."""
 
-        BINDINGS = [Binding("enter", "nothing", show=False)]
+        BINDINGS = [Binding("enter", "nothing", show=False),
+                    Binding("j", "cursor_down", show=False), Binding("k", "cursor_up", show=False)]
 
         def on_mount(self) -> None:
             self.auto_expand = False
@@ -3191,7 +3197,7 @@ arguments. `rig rig <command>` is the same as `rig <command>`.
                              prompting, failing if it's unavailable and allowing no
                              unsandboxed commands
   --select                   with a launch: pick the rigs and pins on the graph first,
-                             with the arrow keys, space, p, or the mouse
+                             with the arrow keys or hjkl, space, p, or the mouse
   -h, --help, help           show this help
   --version                  show rig's version
 """

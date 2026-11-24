@@ -19,6 +19,10 @@ export const KEYS = {
   pluginOf: (pluginId: string) => `plugin:${pluginId}`,
   SWITCH: 'switch',
   CANCEL: 'cancel',
+  LEFT: 'nav-left',
+  DOWN: 'nav-down',
+  UP: 'nav-up',
+  RIGHT: 'nav-right',
   UNPIN: 'pin-unpin',
   TOGGLE: 'pin-toggle',
   LOAD: 'pin-load',
@@ -28,6 +32,8 @@ export const KEYS = {
 export type Actions = {
   toggleRig: (name: string) => void
   activate: (pluginId: string) => void
+  /** hjkl: the cursor down the plugin rows, up from the first into the rig names, and across the rigs. */
+  move: (direction: Direction) => Promise<void>
   switchRigs: () => void
   cancel: () => void
   unpin: (pluginId: string) => void
@@ -35,6 +41,8 @@ export type Actions = {
   togglePin: (pluginId: string) => void
   closeDialog: () => void
 }
+
+export type Direction = 'left' | 'down' | 'up' | 'right'
 
 export type Kit = {
   ui: Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
@@ -52,7 +60,7 @@ export type PaneModel = {
   focus: string | null
 }
 
-const HINT = `↑/↓ tab move · enter toggles, opens a ${Model.PIN} · l switches · esc cancels`
+const HINT = `arrows hjkl tab move · enter toggles, opens a ${Model.PIN} · g goes · esc cancels`
 
 /** The pane's body: the graph `rig --select` draws, or one pin's dialog over it. */
 export function paneView(kit: Kit, model: PaneModel): RenderElement {
@@ -223,9 +231,21 @@ function graphView(kit: Kit, model: PaneModel): RenderElement {
       {rows}
       {tiered && legendText.length > 0 ? <Box flexDirection="row">{legendText}</Box> : null}
       <Box height={1} />
-      <Box flexDirection="row" gap={2}>
-        <Button key={KEYS.SWITCH} plain hotkey="l" onPress={kit.actions.switchRigs}>
-          Switch 🚀
+      <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
+        <Button key={KEYS.LEFT} plain hotkey="h" onPress={() => kit.actions.move('left')}>
+          ←
+        </Button>
+        <Button key={KEYS.DOWN} plain hotkey="j" onPress={() => kit.actions.move('down')}>
+          ↓
+        </Button>
+        <Button key={KEYS.UP} plain hotkey="k" onPress={() => kit.actions.move('up')}>
+          ↑
+        </Button>
+        <Button key={KEYS.RIGHT} plain hotkey="l" onPress={() => kit.actions.move('right')}>
+          →
+        </Button>
+        <Button key={KEYS.SWITCH} plain hotkey="g" onPress={kit.actions.switchRigs}>
+          Go 🚀
         </Button>
         <Button key={KEYS.CANCEL} plain hotkey="q" onPress={kit.actions.cancel}>
           Cancel

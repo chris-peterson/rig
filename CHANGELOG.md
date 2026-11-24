@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- A launch with arguments, including plain `claude`, no longer opens the
+  picker on its own when it has a plugin to install or a pin to choose. It
+  installs what the rigs need and loads each pin as the picker would have
+  offered it: a pin holding the folder you start in loads, and a pin your rigs
+  leave out stays out. The launch summary says which. `rig` alone and
+  `--select` still open the picker, with the same notice when there's
+  something to decide.
+- **The launch key is now `g`, not `l`**, in the `--select` picker, and the
+  `/rig` pane switches on `g` too. `l` now moves right, so the picker moves
+  with `h` `j` `k` `l` as well as the arrow keys. The `/rig` pane's footer
+  shows `h` `j` `k` `l` buttons that move its cursor the same way. `rig setup`
+  takes `j` and `k` for down and up. The picker's footer reads `g Go` in place
+  of `l Launch`, and the `/rig` pane's button reads `Go` in place of `Switch`;
+  Shift+Enter and the 🚀 still launch.
+- The picker's title names its mode, `rig select`, as `rig setup` and the
+  `/rig` pane's `rig switch` do; the command line that opened it moves to the
+  bottom border.
+
 ## 0.5.0
 
 - `p` in the `--select` picker pins the plugin on the cursor's row. rig pins
