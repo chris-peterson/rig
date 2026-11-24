@@ -69,6 +69,11 @@ FAKE_CLAUDE = textwrap.dedent('''\
     ''')
 
 
+# The PATH outside tests, less any folder holding a grok, so only a test's stand-in grok is found.
+WITHOUT_GROK = os.pathsep.join(d for d in os.environ["PATH"].split(os.pathsep)
+                               if not (Path(d) / "grok").exists())
+
+
 def load_rig():
     loader = importlib.machinery.SourceFileLoader("rig", str(RIG))
     spec = importlib.util.spec_from_loader("rig", loader)
@@ -92,7 +97,7 @@ class RigCase(unittest.TestCase):
         fake.chmod(0o755)
         self.env = {
             "HOME": str(self.home),
-            "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
+            "PATH": f"{self.bin}{os.pathsep}{WITHOUT_GROK}",
             "RIG_TEST_ARGV": str(self.argv_log),
             "TERM": "xterm-256color",
             "TEXTUAL_ANIMATIONS": "none",
@@ -193,7 +198,7 @@ class Rigs(RigCase):
         self.write_rigs(BASIC_RIGS)
         self.write_installed("a@m", "b@m", "c@n", "d@n")
 
-    def test_rig_01_reads_rigs_from_user_file(self):
+    def test_def_01_reads_rigs_from_user_file(self):
         self.assertEqual(self.rig("-p", "hi").returncode, 0)
         enabled = self.launched()[0]["enabledPlugins"]
         self.assertTrue(enabled["a@m"] and enabled["b@m"])
@@ -202,23 +207,23 @@ class Rigs(RigCase):
         return [{k for k, v in json.loads(c[1])["enabledPlugins"].items() if v}
                 for c in self.claude_calls() if c[:1] == ["--settings"]]
 
-    def test_rig_02_base_loads_with_the_named_rig(self):
+    def test_compose_01_base_loads_with_the_named_rig(self):
         self.rig("use", "web", "-p", "hi")
         self.assertEqual(self.enabled_sets(), [{"a@m", "b@m", "c@n"}])
 
-    def test_rig_03_several_rigs_by_spaces_commas_or_quotes(self):
+    def test_compose_02_several_rigs_by_spaces_commas_or_quotes(self):
         self.write_rigs(BASIC_RIGS.rstrip(" ") + "      tools:\n        plugins: [d@n]\n")
         for names in (["web", "tools"], ["web,tools"], ["web tools"], ["web, tools"]):
             self.rig("use", *names, "-p", "web")
         self.assertEqual(self.enabled_sets(), [{"a@m", "b@m", "c@n", "d@n"}] * 4)
         self.assertEqual({tuple(c[2:]) for c in self.claude_calls()}, {("-p", "web")})
 
-    def test_rig_10_full_loads_every_installed_plugin(self):
+    def test_compose_05_full_loads_every_installed_plugin(self):
         result = self.rig("use", "full", "-p", "hi")
         self.assertEqual(self.enabled_sets(), [{"a@m", "b@m", "c@n", "d@n"}])
         self.assertIn("rig: all 4 plugins", result.stderr)
 
-    def test_rig_11_rig_definitions_out_of_shape_refused(self):
+    def test_def_02_rig_definitions_out_of_shape_refused(self):
         cases = {
             "rigs:\n  base: {plugins: []}\n  none: {plugins: []}\n": "defines a rig named none",
             "rigs:\n  base: {plugins: []}\n  web: {extends: base, plugins: []}\n": "Take out anything else, such as `extends`",
@@ -233,12 +238,12 @@ class Rigs(RigCase):
             self.assertIn(message, result.stderr)
         self.assertEqual(self.claude_calls(), [])
 
-    def test_rig_04_launch_settings_name_only_the_rig(self):
+    def test_claude_01_launch_settings_name_only_the_rig(self):
         self.write_settings(self.home, {"d@n": False})
         self.rig("-p", "hi")
         self.assertEqual(self.launched()[0]["enabledPlugins"], {"a@m": True, "b@m": True})
 
-    def test_rig_04_project_settings_left_to_the_project(self):
+    def test_claude_01_project_settings_left_to_the_project(self):
         project = self.home / "src" / "proj"
         project.mkdir(parents=True)
         self.write_settings(project, {"p@n": True})
@@ -254,7 +259,7 @@ class Rigs(RigCase):
         path.write_text(json.dumps({"enabledPlugins": {"b@m": False}}))
         return project
 
-    def test_rig_04_project_off_keeps_a_rig_plugin_out(self):
+    def test_claude_01_project_off_keeps_a_rig_plugin_out(self):
         project = self.project_off()
         for cwd in (project, project / "sub"):
             cwd.mkdir(exist_ok=True)
@@ -263,11 +268,11 @@ class Rigs(RigCase):
         self.assertEqual(self.enabled_sets(), [{"a@m"}] * 2)
         self.assertNotIn("b@m", self.launched_overlays()[0]["enabledPlugins"])
 
-    def test_rig_04_project_local_off_keeps_a_rig_plugin_out(self):
+    def test_claude_01_project_local_off_keeps_a_rig_plugin_out(self):
         self.rig("-p", "hi", cwd=self.project_off("settings.local.json"))
         self.assertEqual(self.launched()[0]["enabledPlugins"], {"a@m": True})
 
-    def test_rig_04_user_off_does_not_keep_a_rig_plugin_out(self):
+    def test_claude_01_user_off_does_not_keep_a_rig_plugin_out(self):
         self.write_settings(self.home, {"b@m": False})
         result = self.rig("-p", "hi")
         self.assertEqual(self.launched()[0]["enabledPlugins"], {"a@m": True, "b@m": True})
@@ -276,7 +281,7 @@ class Rigs(RigCase):
     def launched_overlays(self) -> list[dict]:
         return [json.loads(c[1]) for c in self.claude_calls() if c[:1] == ["--settings"]]
 
-    def test_rig_12_user_settings_plugins_turned_off(self):
+    def test_claude_02_user_settings_plugins_turned_off(self):
         path = self.home / ".claude" / "settings.json"
         path.write_text('{\n  "enabledPlugins": {\n    "a@m": true,\n\n    "d@n": true,\n    "e@n": false\n  },\n'
                         '  "model": "opus"\n}\n')
@@ -286,35 +291,35 @@ class Rigs(RigCase):
                                            '    "e@n": false\n  },\n  "model": "opus"\n}\n')
         self.assertNotIn("turned off", self.rig("-p", "hi").stderr)
 
-    def test_rig_05_use_launches_named_rig(self):
+    def test_compose_03_use_launches_named_rig(self):
         result = self.rig("use", "web", "-p", "hi")
         self.assertIn("rig: base + web, 3 plugins", result.stderr)
         self.assertEqual(self.launched()[1], ["-p", "hi"])
 
-    def test_rig_05_use_unknown_rig(self):
+    def test_compose_03_use_unknown_rig(self):
         result = self.rig("use", "nope")
         self.assertIn("no rig named nope. Rigs: base, web, full", result.stderr)
         self.assertEqual(self.claude_calls(), [])
 
-    def test_rig_06_launch_naming_no_rig_uses_default(self):
+    def test_compose_04_launch_naming_no_rig_uses_default(self):
         result = self.rig("claude")
         self.assertIn("rig: base, 2 plugins", result.stderr)
         self.assertEqual(self.launched()[1], [])
 
-    def test_rig_06_default_rigs_added_to_base(self):
+    def test_compose_04_default_rigs_added_to_base(self):
         self.write_rigs("default: [web]\n" + textwrap.dedent(BASIC_RIGS))
         result = self.rig("-p", "hi")
         self.assertIn("rig: base + web, 3 plugins", result.stderr)
 
-    def test_shell_06_rig_claude_runs_rig_commands(self):
+    def test_tool_02_rig_claude_runs_rig_commands(self):
         self.assertTrue(self.rig("claude", "list").stdout.startswith("base (every launch)"))
         self.assertEqual(self.claude_calls(), [])
 
-    def test_shell_06_rig_claude_launches_with_arguments(self):
+    def test_tool_02_rig_claude_launches_with_arguments(self):
         self.rig("claude", "-p", "hi")
         self.assertEqual(self.launched()[1], ["-p", "hi"])
 
-    def test_rig_07_list(self):
+    def test_list_01_list(self):
         result = self.rig("list")
         self.assertEqual(result.stdout, textwrap.dedent("""\
             base (every launch)
@@ -325,7 +330,7 @@ class Rigs(RigCase):
               plugins: every installed plugin
             """))
 
-    def test_rig_13_list_json(self):
+    def test_list_02_list_json(self):
         self.write_rigs("default: [web]\n" + textwrap.dedent(BASIC_RIGS))
         listed = json.loads(self.rig("list", "--json").stdout)
         self.assertEqual(listed["default"], ["web"])
@@ -333,7 +338,7 @@ class Rigs(RigCase):
                          [("base", True, False), ("web", False, True), ("full", True, False)])
         self.assertEqual(listed["rigs"][2]["plugins"], ["a@m", "b@m", "c@n", "d@n"])
 
-    def test_rig_14_list_graph(self):
+    def test_list_03_list_graph(self):
         self.write_rigs("default: [web]\n" + textwrap.dedent(BASIC_RIGS))
         self.assertEqual(self.rig("list", "--graph").stdout, textwrap.dedent("""\
             plugin  base  ★web
@@ -343,7 +348,7 @@ class Rigs(RigCase):
             d@n      ·     ·
             """))
 
-    def test_rig_17_none_refused_headless_and_alongside_other_rigs(self):
+    def test_compose_08_none_refused_headless_and_alongside_other_rigs(self):
         result = self.rig("use", "none", "-p", "hi")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("needs someone at a terminal to confirm it", result.stderr)
@@ -352,7 +357,7 @@ class Rigs(RigCase):
         self.assertIn("none launches Claude Code with no plugins, so it goes alone", output)
         self.assertEqual(self.claude_calls(), [])
 
-    def test_rig_16_none_launches_once_confirmed(self):
+    def test_compose_07_none_launches_once_confirmed(self):
         self.write_settings(self.home / "proj", {"p@n": True})
         status, output = self.rig_tty("use", "none", answers="n\n")
         self.assertNotEqual(status, 0)
@@ -366,14 +371,14 @@ class Rigs(RigCase):
         self.assertTrue(settings["sandbox"]["enabled"])
         self.assertEqual(rest, [])
 
-    def test_rig_09_missing_plugin_refused_headless(self):
+    def test_install_02_missing_plugin_refused_headless(self):
         self.write_installed("a@m")
         result = self.rig("-p", "hi")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("b@m", result.stderr)
         self.assertEqual(self.claude_calls(), [])
 
-    def test_rig_08_missing_plugin_installed_on_launch(self):
+    def test_install_01_missing_plugin_installed_on_launch(self):
         self.write_installed("a@m")
         status, output = self.rig_tty("--select", keys=["g"])
         self.assertEqual(status, 0, output)
@@ -381,7 +386,7 @@ class Rigs(RigCase):
         self.assertEqual(self.claude_calls()[0], ["plugin", "install", "b@m"])
         self.assertEqual(self.claude_calls()[1][0], "--settings")
 
-    def test_rig_08_launch_05_missing_plugin_installed_without_the_picker(self):
+    def test_install_01_launch_05_missing_plugin_installed_without_the_picker(self):
         self.write_installed("a@m")
         status, output = self.rig_tty("claude")
         self.assertEqual(status, 0, output)
@@ -389,14 +394,14 @@ class Rigs(RigCase):
         self.assertEqual(self.claude_calls()[0], ["plugin", "install", "b@m"])
         self.assertEqual(self.claude_calls()[1][0], "--settings")
 
-    def test_rig_08_missing_plugin_refused_on_cancel(self):
+    def test_install_01_missing_plugin_refused_on_cancel(self):
         self.write_installed("a@m")
         status, output = self.rig_tty("--select", keys=["q"])
         self.assertNotEqual(status, 0)
         self.assertIn("launch cancelled", output)
         self.assertEqual(self.claude_calls(), [])
 
-    def test_rig_08_project_scope_install_counts(self):
+    def test_install_01_project_scope_install_counts(self):
         project = self.home / "proj"
         project.mkdir()
         self.write_installed("a@m", project={"b@m": project})
@@ -449,15 +454,15 @@ class Rules(RigCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stderr.splitlines()[0]
 
-    def test_rig_18_matching_rule_makes_a_default_rig(self):
+    def test_rule_01_matching_rule_makes_a_default_rig(self):
         self.assertTrue(self.rigs_at(self.folder("src", "acme", "svc")).startswith("rig: base + work,"))
         self.assertTrue(self.rigs_at(self.folder("src", "github", "svc")).startswith("rig: base,"))
 
-    def test_rig_18_rules_add_to_the_listed_defaults(self):
+    def test_rule_01_rules_add_to_the_listed_defaults(self):
         self.write_rigs("default: [spec]\n" + textwrap.dedent(RULE_RIGS))
         self.assertTrue(self.rigs_at(self.folder("src", "acme")).startswith("rig: base + spec + work,"))
 
-    def test_rig_18_a_rule_matches_only_when_each_condition_does(self):
+    def test_rule_01_a_rule_matches_only_when_each_condition_does(self):
         svc = self.repo("src", "acme", "svc")
         self.assertNotIn("both", self.rigs_at(svc))
         (svc / "Makefile").write_text("")
@@ -466,7 +471,7 @@ class Rules(RigCase):
         (other / "Makefile").write_text("")
         self.assertNotIn("both", self.rigs_at(other))
 
-    def test_rig_19_path_matching(self):
+    def test_rule_02_path_matching(self):
         rig = load_rig()
         home = Path.home().resolve()
         cases = [("~/src/acme/", home / "src" / "acme", True),
@@ -486,7 +491,7 @@ class Rules(RigCase):
             with self.subTest(pattern=pattern, folder=folder):
                 self.assertEqual(rig.path_matches(pattern, folder), expected)
 
-    def test_rig_20_exists_matches_the_repository_from_its_root(self):
+    def test_rule_03_exists_matches_the_repository_from_its_root(self):
         repo = self.repo("src", "tf-svc")
         sub = self.folder("src", "tf-svc", "deep", "er")
         self.assertNotIn("infra", self.rigs_at(sub))
@@ -498,14 +503,14 @@ class Rules(RigCase):
         (repo / "SPEC.md").write_text("")
         self.assertIn("+ spec", self.rigs_at(sub))
 
-    def test_rig_20_ignored_files_dont_count(self):
+    def test_rule_03_ignored_files_dont_count(self):
         repo = self.repo("src", "app")
         (repo / ".gitignore").write_text("vendor/\n")
         self.folder("src", "app", "vendor")
         (repo / "vendor" / "x.tf").write_text("")
         self.assertNotIn("infra", self.rigs_at(repo))
 
-    def test_rig_20_outside_a_repository_the_files_under_the_folder(self):
+    def test_rule_03_outside_a_repository_the_files_under_the_folder(self):
         folder = self.folder("scratch", "plain")
         self.folder("scratch", "plain", "a")
         (folder / "a" / "main.tf").write_text("")
@@ -523,12 +528,12 @@ class Rules(RigCase):
         self.assertIn("rig: base + spec, 2 plugins\n", result.stderr)
         self.assertNotIn("by rule", result.stderr)
 
-    def test_rig_07_list_names_the_rule(self):
+    def test_list_01_list_names_the_rule(self):
         out = self.rig("list", cwd=self.folder("src", "acme")).stdout
         self.assertIn("work (default here: path ~/src/acme/)\n", out)
         self.assertIn("\ninfra\n", out)
 
-    def test_rig_13_list_json_carries_rules(self):
+    def test_list_02_list_json_carries_rules(self):
         listed = json.loads(self.rig("list", "--json", cwd=self.folder("src", "acme")).stdout)
         self.assertEqual(listed["default"], ["work"])
         rigs = {r["name"]: r for r in listed["rigs"]}
@@ -536,12 +541,12 @@ class Rules(RigCase):
         self.assertEqual(rigs["work"]["rule"], "path ~/src/acme/")
         self.assertEqual((rigs["infra"]["default"], rigs["infra"]["rule"]), (False, None))
 
-    def test_rig_14_graph_stars_the_defaults_here(self):
+    def test_list_03_graph_stars_the_defaults_here(self):
         head = self.rig("list", "--graph", cwd=self.folder("src", "acme")).stdout.splitlines()[0]
         self.assertIn("★work", head)
         self.assertNotIn("★infra", head)
 
-    def test_rig_11_rules_out_of_shape_refused(self):
+    def test_def_02_rules_out_of_shape_refused(self):
         cases = {
             "rigs:\n  base: {plugins: [], rules: [{path: x/}]}\n": "rig base in",
             "rigs:\n  base: {plugins: []}\n  web: {rules: [{branch: main}]}\n": "gives path, exists, or both",
@@ -584,7 +589,7 @@ class Launch(RigCase):
         self.rig("-p", "--", "hi")
         self.assertEqual(self.launched()[1], ["-p", "--", "hi"])
 
-    def test_launch_16_an_option_neither_takes_is_refused(self):
+    def test_tool_04_an_option_neither_takes_is_refused(self):
         for args in (["--graph"], ["-p", "--nope=1", "hi"], ["use", "web", "--graph"]):
             result = self.rig(*args)
             self.assertNotEqual(result.returncode, 0)
@@ -754,7 +759,7 @@ class Shell(RigCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("usage: rig", result.stdout)
 
-    def test_launch_04_claude_subcommand_passes_through_unchanged(self):
+    def test_tool_03_claude_subcommand_passes_through_unchanged(self):
         result = self.rig("plugin", "list", "--json")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.claude_calls(), [["plugin", "list", "--json"]])
@@ -767,7 +772,7 @@ class Shell(RigCase):
         self.rig("plugin", "list")
         self.assertEqual(self.claude_calls(), [["plugin", "list"]])
 
-    def test_launch_04_subcommand_alias(self):
+    def test_tool_03_subcommand_alias(self):
         self.rig("plugins", "list")
         self.assertEqual(self.claude_calls(), [["plugins", "list"]])
 
@@ -800,7 +805,7 @@ class Shell(RigCase):
         lines = (self.home / ".zshrc").read_text().splitlines()
         self.assertEqual(lines[1:3], ["fpath=(~/.zsh/completions $fpath)", "autoload -Uz compinit && compinit"])
 
-    def test_shell_04_install_makes_claude_run_rig(self):
+    def test_tool_05_install_makes_claude_run_rig(self):
         self.rig("install-cli")
         self.assertIn('claude() { rig claude "$@" }', (self.home / ".zsh" / "rig.zsh").read_text())
         self.assertIn("source ~/.zsh/rig.zsh", (self.home / ".zshrc").read_text())
@@ -808,7 +813,7 @@ class Shell(RigCase):
                                env=self.env, stdin=subprocess.DEVNULL)
         self.assertIn("claude: function", found.stdout)
 
-    def test_shell_04_leaves_another_claude_function_alone(self):
+    def test_tool_05_leaves_another_claude_function_alone(self):
         other = self.home / "other.zsh"
         other.write_text("claude() { echo other }\n")
         (self.home / ".zshrc").write_text(f"source {other}\n")
@@ -827,11 +832,11 @@ class Shell(RigCase):
         self.assertTrue(result.stdout.startswith("usage: rig"))
         self.assertEqual(self.claude_calls(), [])
 
-    def test_shell_06_rig_claude_rig_is_bare_rig(self):
+    def test_tool_02_rig_claude_rig_is_bare_rig(self):
         self.assertTrue(self.rig("claude", "rig").stdout.startswith("usage: rig"))
         self.assertEqual(self.claude_calls(), [])
 
-    def test_shell_06_rig_claude_passes_subcommands_through(self):
+    def test_tool_02_rig_claude_passes_subcommands_through(self):
         self.rig("claude", "plugin", "list")
         self.assertEqual(self.claude_calls(), [["plugin", "list"]])
 
@@ -1193,18 +1198,18 @@ class Pins(RigCase):
         self.assertIs(overlay["enabledPlugins"]["b@m"], False)
         self.assertIn("\n📌 b  ~/src/b  (just now)\n", result.stderr)
 
-    def test_pin_11_pin_holding_cwd_turns_auto_mode_server_off(self):
+    def test_claude_03_pin_holding_cwd_turns_auto_mode_server_off(self):
         self.rig("pin", str(self.ckout))
         result = self.rig("-p", "hi", cwd=self.ckout)
         self.assertEqual(self.auto_mode_server(), "0")
         self.assertIn("auto mode: CLAUDE_CODE_AUTO_MODE_SERVER=0, since b is pinned here", result.stderr)
 
-    def test_pin_11_folder_holding_pin_turns_auto_mode_server_off(self):
+    def test_claude_03_folder_holding_pin_turns_auto_mode_server_off(self):
         self.rig("pin", str(self.ckout))
         self.rig("-p", "hi", cwd=self.home / "src")
         self.assertEqual(self.auto_mode_server(), "0")
 
-    def test_pin_11_unrelated_folder_leaves_auto_mode_server(self):
+    def test_claude_03_unrelated_folder_leaves_auto_mode_server(self):
         self.rig("pin", str(self.ckout))
         elsewhere = self.home / "elsewhere"
         elsewhere.mkdir()
@@ -1212,13 +1217,13 @@ class Pins(RigCase):
         self.assertIsNone(self.auto_mode_server())
         self.assertNotIn("auto mode:", result.stderr)
 
-    def test_pin_11_pin_not_loaded_leaves_auto_mode_server(self):
+    def test_claude_03_pin_not_loaded_leaves_auto_mode_server(self):
         x = self.checkout("x")
         self.rig("pin", str(x))
         self.rig("-p", "hi", cwd=x)
         self.assertIsNone(self.auto_mode_server())
 
-    def test_pin_11_environment_value_kept(self):
+    def test_claude_03_environment_value_kept(self):
         self.rig("pin", str(self.ckout))
         result = self.rig("-p", "hi", cwd=self.ckout, env={"CLAUDE_CODE_AUTO_MODE_SERVER": "1"})
         self.assertEqual(self.auto_mode_server(), "1")
@@ -1315,13 +1320,13 @@ class Pins(RigCase):
         self.assertIn("rig: base + x@n - a@m, 2 plugins", output)
         self.assertEqual(self.launched()[0]["enabledPlugins"], {"a@m": False, "b@m": True, "x@n": True})
 
-    def test_rig_04_project_off_yields_to_a_plugin_picked_on_its_own(self):
+    def test_claude_01_project_off_yields_to_a_plugin_picked_on_its_own(self):
         self.write_settings(self.away, {"x@n": False})
         status, output = self.rig_tty("--select", "--", "hi", keys=["down", "enter", "down", "down", "down", "enter", "g"])
         self.assertEqual(status, 0, output)
         self.assertEqual(self.launched()[0]["enabledPlugins"], {"a@m": False, "b@m": True, "x@n": True})
 
-    def test_rig_04_project_off_leaves_a_pin_as_it_is(self):
+    def test_claude_01_project_off_leaves_a_pin_as_it_is(self):
         self.write_settings(self.away, {"b@m": False})
         self.rig("pin", str(self.ckout))
         self.rig("-p", "hi")
@@ -1393,7 +1398,7 @@ class Sandbox(RigCase):
             """)
         self.write_installed("a@m")
 
-    def test_sandbox_01_flag_turns_sandbox_on_strictly(self):
+    def test_claude_04_flag_turns_sandbox_on_strictly(self):
         result = self.rig("--sandbox", "-p", "hi")
         overlay, args = self.launched()
         self.assertEqual(overlay["sandbox"],
@@ -1402,13 +1407,13 @@ class Sandbox(RigCase):
         self.assertEqual(args, ["-p", "hi"])
         self.assertIn("sandbox: on", result.stderr)
 
-    def test_sandbox_01_flag_after_rig_name(self):
+    def test_claude_04_flag_after_rig_name(self):
         self.rig("use", "base", "-p", "hi", "--sandbox")
         overlay, args = self.launched()
         self.assertIn("sandbox", overlay)
         self.assertEqual(args, ["-p", "hi"])
 
-    def test_sandbox_01_flag_after_double_dash_goes_to_claude(self):
+    def test_claude_04_flag_after_double_dash_goes_to_claude(self):
         self.rig("-p", "--", "--sandbox")
         overlay, args = self.launched()
         self.assertNotIn("sandbox", overlay)
@@ -2832,3 +2837,202 @@ class CompletionParity(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+FAKE_GROK = textwrap.dedent('''\
+    #!{python}
+    import json, os, sys
+    from pathlib import Path
+    HELP = """Grok Build TUI
+
+    Usage: grok [OPTIONS] [PROMPT]... [COMMAND]
+
+    Options:
+          --add-dir <DIR>
+              Also work in this folder
+      -m, --model <MODEL>
+              Model ID to use
+      -r, --resume [<SESSION_ID_OR_TITLE>]
+              Resume a session
+          --sandbox <PROFILE>
+              Sandbox profile
+      -p, --single [<PROMPT>]
+              Single-turn prompt
+
+    Commands:
+      inspect      Show the configuration Grok discovers for this directory
+      plugin       Manage plugins and marketplace sources
+    """
+    if sys.argv[1:] == ["--help"]:
+        print(HELP)
+        sys.exit(0)
+    if sys.argv[1:] == ["inspect", "--json"]:
+        import tomllib
+        config = tomllib.loads((Path(os.environ["GROK_HOME"]) / "config.toml").read_text())
+        hidden = os.environ.get("RIG_TEST_GROK_HIDES", "")
+        print(json.dumps({{"plugins": [{{"name": n, "enabled": True}} for n in config["plugins"]["enabled"]
+                                      if n != hidden]}}))
+        sys.exit(0)
+    home = os.environ.get("GROK_HOME")
+    seen = {{"argv": sys.argv[1:], "home": home}}
+    if home:
+        home = Path(home)
+        seen["config"] = (home / "config.toml").read_text()
+        seen["links"] = {{e.name: e.is_symlink() for e in home.iterdir()}}
+        seen["plugins"] = {{e.name: os.path.realpath(e) for e in (home / "plugins").iterdir()}}
+        if os.environ.get("RIG_TEST_GROK_WRITES"):
+            with open(home / "config.toml", "a") as f:
+                f.write("\\n[ui]\\ncompact_mode = true\\n")
+            (home / "made.json").write_text("new")
+            (home / "auth.json").unlink()
+            (home / "auth.json").write_text("refreshed")
+        if os.environ.get("RIG_TEST_GROK_USER_EDIT"):
+            user = Path(os.environ["HOME"]) / ".grok" / "config.toml"
+            user.write_text(user.read_text() + "\\n# edited elsewhere\\n")
+    with open(os.environ["RIG_TEST_ARGV"] + ".grok", "a") as f:
+        f.write(json.dumps(seen) + "\\n")
+    sys.exit(int(os.environ.get("RIG_TEST_EXIT", "0")))
+    ''')
+
+USER_GROK_CONFIG = """\
+[ui]
+max_thoughts_width = 120
+
+[plugins]
+enabled = [
+    "user/1ae89a2d/anchor",
+]
+paths = ["~/my-plugins"]
+"""
+
+
+class Grok(RigCase):
+    """GROK: launching Grok Build with a grok home of its own."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_rigs(BASIC_RIGS)
+        self.write_installed("a@m", "b@m", "c@n")
+        fake = self.bin / "grok"
+        fake.write_text(FAKE_GROK.format(python=sys.executable))
+        fake.chmod(0o755)
+        self.grok = self.home / ".grok"
+        (self.grok / "sessions").mkdir(parents=True)
+        (self.grok / "auth.json").write_text("token")
+        (self.grok / "config.toml").write_text(USER_GROK_CONFIG)
+        self.claude_settings = self.home / ".claude" / "settings.json"
+        self.claude_settings.write_text(json.dumps({"enabledPlugins": {"a@m": True}}))
+
+    def grok_calls(self) -> list[dict]:
+        path = Path(f"{self.argv_log}.grok")
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def launched(self) -> dict:
+        calls = self.grok_calls()
+        self.assertEqual(len(calls), 1, calls)
+        return calls[0]
+
+    def test_tool_02_launches_grok_with_the_rigs(self):
+        result = self.rig("grok", "use", "web", "-m", "grok-4")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        seen = self.launched()
+        self.assertEqual(seen["argv"], ["-m", "grok-4"])
+        self.assertIn('enabled = ["a", "b", "c"]', seen["config"])
+        self.assertIn("rig: base + web", result.stderr)
+        self.assertIn("tool: Grok Build", result.stderr)
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_tool_02_launches_the_default_rigs_with_no_arguments(self):
+        self.rig("grok")
+        self.assertIn('enabled = ["a", "b"]', self.launched()["config"])
+
+    def test_grok_01_the_launch_has_a_grok_home_of_its_own(self):
+        self.rig("grok", "-p", "hi")
+        seen = self.launched()
+        home = Path(seen["home"])
+        self.assertTrue(home.is_relative_to(self.home / ".rig" / "grok"), home)
+        self.assertEqual(seen["links"], {"sessions": True, "auth.json": True, "config.toml": False, "plugins": False})
+        self.assertFalse(home.exists())
+        self.assertEqual((self.grok / "config.toml").read_text(), USER_GROK_CONFIG)
+
+    def test_grok_02_config_replaces_the_plugins_table(self):
+        self.rig("grok", "-p", "hi")
+        config = self.launched()["config"]
+        self.assertIn("max_thoughts_width = 120", config)
+        self.assertNotIn("anchor", config)
+        self.assertNotIn("my-plugins", config)
+        self.assertEqual(config.count("[plugins]"), 1)
+
+    def test_grok_03_a_loaded_pin_is_linked_under_its_name(self):
+        ckout = self.home / "src" / "b"
+        (ckout / ".claude-plugin").mkdir(parents=True)
+        (ckout / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "b"}))
+        away = self.home / "work"
+        away.mkdir()
+        self.rig("pin", str(ckout))
+        (self.grok / "plugins").mkdir()
+        (self.grok / "plugins" / "mine").mkdir()
+        result = self.rig("grok", "-p", "hi", cwd=away)
+        seen = self.launched()
+        self.assertEqual(seen["plugins"], {"b": str(ckout.resolve()), "mine": str((self.grok / "plugins" / "mine").resolve())})
+        self.assertIn("📌 b  ~/src/b", result.stderr)
+
+    def test_grok_04_what_the_session_wrote_comes_back(self):
+        self.env["RIG_TEST_GROK_WRITES"] = "1"
+        self.env["RIG_TEST_EXIT"] = "3"
+        result = self.rig("grok", "-p", "hi")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        config = (self.grok / "config.toml").read_text()
+        self.assertIn("compact_mode = true", config)
+        self.assertIn('"user/1ae89a2d/anchor"', config)
+        self.assertNotIn('enabled = ["a", "b"]', config)
+        self.assertEqual((self.grok / "made.json").read_text(), "new")
+        self.assertEqual((self.grok / "auth.json").read_text(), "refreshed")
+        self.assertEqual(list((self.home / ".rig" / "grok").iterdir()), [])
+
+    def test_grok_05_a_config_changed_meanwhile_is_kept(self):
+        self.env["RIG_TEST_GROK_WRITES"] = "1"
+        self.env["RIG_TEST_GROK_USER_EDIT"] = "1"
+        result = self.rig("grok", "-p", "hi")
+        self.assertIn("# edited elsewhere", (self.grok / "config.toml").read_text())
+        kept = list(self.grok.glob("config.toml.rig-*"))
+        self.assertEqual(len(kept), 1, list(self.grok.iterdir()))
+        self.assertIn("compact_mode = true", kept[0].read_text())
+        self.assertIn("changed while grok ran", result.stderr)
+
+    def test_tool_03_a_grok_command_runs_unchanged(self):
+        self.rig("grok", "plugin", "list")
+        seen = self.launched()
+        self.assertEqual(seen["argv"], ["plugin", "list"])
+        self.assertIsNone(seen["home"])
+
+    def test_tool_04_an_option_grok_doesnt_take_is_refused(self):
+        result = self.rig("grok", "--nope")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("neither rig nor Grok Build takes it", result.stderr)
+        self.assertEqual(self.grok_calls(), [])
+
+    def test_grok_06_sandbox_is_groks_own(self):
+        self.rig("grok", "--sandbox", "strict", "-p", "hi")
+        self.assertEqual(self.launched()["argv"], ["--sandbox", "strict", "-p", "hi"])
+
+    def test_grok_07_claude_settings_are_left_alone(self):
+        before = self.claude_settings.read_text()
+        self.rig("grok", "-p", "hi")
+        self.assertEqual(self.claude_settings.read_text(), before)
+
+    def test_grok_08_a_plugin_grok_doesnt_load_is_named(self):
+        self.env["RIG_TEST_GROK_HIDES"] = "b"
+        result = self.rig("grok", "-p", "hi")
+        self.assertIn("not loaded by grok, which doesn't find it: b", result.stderr)
+        self.assertNotIn("not loaded by grok", self.rig("grok", "-p", "hi", env={"RIG_TEST_GROK_HIDES": ""}).stderr)
+
+    def test_tool_05_install_makes_grok_run_rig(self):
+        result = self.rig("install-cli")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        snippet = (self.home / ".zsh" / "rig.zsh").read_text()
+        self.assertIn('grok() { rig grok "$@" }', snippet)
+        self.assertIn('claude() { rig claude "$@" }', snippet)
+        found = subprocess.run(["zsh", "-ic", "whence -w grok"], capture_output=True, text=True,
+                               env=self.env, stdin=subprocess.DEVNULL)
+        self.assertIn("grok: function", found.stdout)

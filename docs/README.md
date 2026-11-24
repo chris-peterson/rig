@@ -51,6 +51,8 @@ rig                     # pick the rigs on the graph above, then launch
 - `rig setup` is a full-screen editor for your rigs, and first-run setup builds
   your base rig from the plugins your settings enable today.
 - `/rig` switches a running session to other rigs and keeps the conversation.
+- **Grok Build** gets the same rigs and pins: `grok` launches it through rig.
+  [Supported tools](/tools) says what differs.
 
 [Getting started](/getting-started) installs rig and walks through the first
 launch. [Rigs](/rigs) covers rigs, folder rules, and switching in depth.

@@ -2,6 +2,7 @@
 - [Getting started](/getting-started)
 - [Rigs](/rigs)
 - [Pins](/pins)
+- [Supported tools](/tools)
 - [Reference](/reference)
 - Specification
   - [SPEC](/spec)

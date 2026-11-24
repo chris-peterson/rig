@@ -96,7 +96,7 @@ export function selection(state: State, names: Iterable<string>): string[] {
 }
 
 /**
- * RIG-02, RIG-03, RIG-10, LAUNCH-11: base's plugins, then each chosen rig's,
+ * COMPOSE-01, COMPOSE-02, COMPOSE-05, LAUNCH-11: base's plugins, then each chosen rig's,
  * without repeats, less the ones taken out, then the ones picked on their own.
  */
 export function planOf(state: State, picks: Picks): Plan {
@@ -378,7 +378,7 @@ export type Graph = {
 }
 
 /**
- * RIG-14, LAUNCH-07: each rig's plugins together, then the installed plugins no
+ * LIST-03, LAUNCH-07: each rig's plugins together, then the installed plugins no
  * rig names, then pins for none of those. SWITCH-05: a row is named without its
  * marketplace, unless another row shares the name.
  */

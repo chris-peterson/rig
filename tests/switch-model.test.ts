@@ -10,7 +10,7 @@ describe('switch-model', () => {
     expect(start).toEqual({ rigs: ['web'], added: [], removed: [], choices: { '/src/rig': true } })
   })
 
-  test('RIG-02: base, then each rig, without repeats; full is every installed plugin', () => {
+  test('COMPOSE-01: base, then each rig, without repeats; full is every installed plugin', () => {
     expect([...Model.planOf(STATE, start).sources]).toEqual([
       ['anchor@getty', 'base'],
       ['rig@cp', 'web'],
@@ -82,7 +82,7 @@ describe('switch-model', () => {
     expect(Model.offerFor(plan, 'rig@cp')?.alone).toBe(false)
   })
 
-  test('RIG-14, PIN-12, SWITCH-05: the graph lists rigs’ plugins, then the rest installed, by name, a 📌 in front of pinned ones', () => {
+  test('LIST-03, PIN-12, SWITCH-05: the graph lists rigs’ plugins, then the rest installed, by name, a 📌 in front of pinned ones', () => {
     const graph = Model.graphOf(STATE)
 
     expect(graph.rows).toEqual(['anchor@getty', 'splunk@getty', 'rig@cp', 'beacon@getty', 'tack@cp'])

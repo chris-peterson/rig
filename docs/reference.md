@@ -14,7 +14,8 @@
 | `rig unpin [<path\|name>...]` | stop using a pinned checkout; with no arguments, the one you're in |
 | `rig doctor` | check the `rig` command, the `claude` function, and tab completion in a new zsh, then run Claude Code's doctor |
 | `rig install-cli` | what `/rig:install-rig` runs: put `rig` on PATH with tab completion, and make `claude` run rig |
-| `/rig [<rig>...]` | in a session: open the picker and switch, or switch straight to the named rigs |
+| `rig grok [<args>]` | the same as `rig claude [<args>]`, launching [Grok Build](/tools); installed as `grok` when grok is on your PATH |
+| `/rig [<rig>...]` | in a Claude Code session: open the picker and switch, or switch straight to the named rigs |
 
 | Option | Does |
 | --- | --- |
