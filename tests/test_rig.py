@@ -1172,13 +1172,28 @@ class Pins(RigCase):
         self.assertEqual(self.launched()[1][:2], ["--plugin-dir", str(self.ckout.resolve())])
         self.assertEqual(self.auto_mode_server(), "0")
 
-    def test_launch_05_pin_holding_cwd_loads_without_the_picker(self):
+    def test_launch_05_pin_holding_cwd_opens_the_picker(self):
         self.rig("pin", str(self.ckout))
-        status, output = self.rig_tty("claude", cwd=self.ckout)
+        status, output = self.rig_tty("claude", keys=["g"], cwd=self.ckout)
         self.assertEqual(status, 0, output)
-        self.assertNotIn(ALT_SCREEN.decode(), output)
+        self.assertIn(ALT_SCREEN.decode(), output)
+        self.assertIn("you're in or above its checkout, so the", output)
         self.assertIn("📌 b  ~/src/b  (just now, ❗ live checkout)", output)
         self.assertEqual(self.launched()[1][:2], ["--plugin-dir", str(self.ckout.resolve())])
+
+    def test_launch_05_folder_above_a_loading_pin_opens_the_picker(self):
+        self.rig("pin", str(self.ckout))
+        status, output = self.rig_tty("claude", keys=["q"], cwd=self.home / "src")
+        self.assertNotEqual(status, 0, output)
+        self.assertIn(ALT_SCREEN.decode(), output)
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_launch_05_live_checkout_of_a_pin_not_loading_launches_without_the_picker(self):
+        x = self.checkout("x")
+        self.rig("pin", str(x))
+        status, output = self.rig_tty("claude", cwd=self.home / "src")
+        self.assertEqual(status, 0, output)
+        self.assertNotIn(ALT_SCREEN.decode(), output)
 
     def test_pin_07_pin_holding_cwd_skipped_for_this_launch(self):
         self.rig("pin", str(self.ckout))
@@ -2955,6 +2970,22 @@ class Grok(RigCase):
         self.assertFalse(home.exists())
         self.assertEqual((self.grok / "config.toml").read_text(), USER_GROK_CONFIG)
 
+    def test_grok_09_a_later_launch_reuses_the_grok_home_path(self):
+        self.rig("grok", "-p", "hi")
+        self.rig("grok", "-p", "hi")
+        first, second = self.grok_calls()
+        self.assertEqual(first["home"], second["home"])
+        self.assertEqual(Path(first["home"]), self.home / ".rig" / "grok" / "1")
+
+    def test_grok_09_a_launch_beside_a_running_one_takes_the_next_path(self):
+        import fcntl
+        root = self.home / ".rig" / "grok"
+        root.mkdir(parents=True)
+        with (root / "1.lock").open("w") as held:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.rig("grok", "-p", "hi")
+        self.assertEqual(Path(self.launched()["home"]), root / "2")
+
     def test_grok_02_config_replaces_the_plugins_table(self):
         self.rig("grok", "-p", "hi")
         config = self.launched()["config"]
@@ -2988,7 +3019,7 @@ class Grok(RigCase):
         self.assertNotIn('enabled = ["a", "b"]', config)
         self.assertEqual((self.grok / "made.json").read_text(), "new")
         self.assertEqual((self.grok / "auth.json").read_text(), "refreshed")
-        self.assertEqual(list((self.home / ".rig" / "grok").iterdir()), [])
+        self.assertEqual([p.name for p in (self.home / ".rig" / "grok").iterdir()], ["1.lock"])
 
     def test_grok_05_a_config_changed_meanwhile_is_kept(self):
         self.env["RIG_TEST_GROK_WRITES"] = "1"

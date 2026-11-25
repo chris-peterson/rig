@@ -427,7 +427,9 @@ _Retired 2026-11-24: moved to [TOOL-03](#tool-03). The ID is not reused._
 #### `LAUNCH-05`
 When an interactive launch has arguments and no `--select`, the system shall
 launch without the picker, whatever it has to install or pins to choose, each
-pin loading as the picker would offer it. When the picker opens on a launch
+pin loading as the picker would offer it, unless a pin it would load holds the
+working directory or sits inside it: then it shall open the picker first, since
+the session would run on the files it edits. When the picker opens on a launch
 with a plugin to install or a pin to choose, it shall start with its cursor on
 the first pin to choose, else the first plugin to install, and a notice naming
 each: a pin that holds the working directory and whether its checkout loads, a
@@ -646,6 +648,12 @@ files unchanged and set no Claude Code environment variable.
 If Grok Build doesn't load one of a launch's plugins, as `grok inspect` reports
 in the launch's grok home, then the system shall name it before Grok Build
 starts.
+
+#### `GROK-09`
+When a launch starts Grok Build, the system shall put its grok home at the
+first numbered path no running Grok Build launch holds, so a later launch
+reuses the path, and a command grok remembers as always allowed from a pinned
+plugin keeps applying.
 
 ### `SHELL`
 Shell integration

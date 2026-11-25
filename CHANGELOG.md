@@ -28,12 +28,12 @@
   directly, and the editor takes up what you save there, unless it has unsaved
   changes of its own, which it keeps and warns about.
 - A launch with arguments, including plain `claude`, no longer opens the
-  picker on its own when it has a plugin to install or a pin to choose. It
-  installs what the rigs need and loads each pin as the picker would have
-  offered it: a pin holding the folder you start in loads, and a pin your rigs
-  leave out stays out. The launch summary says which. `rig` alone and
-  `--select` still open the picker, with the same notice when there's
-  something to decide.
+  picker on its own when it has a plugin to install or a pin your rigs leave
+  out. It installs what the rigs need and leaves that pin out, and the launch
+  summary says so. It still stops at the picker when it would load a pin whose
+  checkout you're starting in, or above, since the session would edit the
+  files it runs on. `rig` alone and `--select` still open the picker, with the
+  same notice when there's something to decide.
 - **The launch key is now `g`, not `l`**, in the `--select` picker, and the
   `/rig` pane switches on `g` too. `l` now moves right, so the picker moves
   with `h` `j` `k` `l` as well as the arrow keys. The `/rig` pane's footer

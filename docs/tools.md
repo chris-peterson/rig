@@ -70,6 +70,11 @@ in `~/.grok` except two things:
 Two grok sessions on different rigs run side by side without touching each
 other's plugins.
 
+The launch's grok home is `~/.rig/grok/1`, or the next number up while another
+grok launch holds it, so a pinned plugin's scripts keep the same path from one
+launch to the next. An *Always allow* you give one of them in grok goes on
+applying, as grok's grants name the command's path.
+
 When grok exits, rig carries back what the session wrote. A setting changed
 with `/settings` goes into your `config.toml`, which keeps your own `[plugins]`
 table. A file grok created or replaced, such as a refreshed sign-in, goes back

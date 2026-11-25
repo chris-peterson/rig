@@ -73,8 +73,10 @@ after `rig pin` offers the names that resolve either way.
 
 Starting a session inside a pinned checkout, or in a folder above one, means
 the session edits the files it's running on. That works, but it can give
-unpredictable results, so the picker marks that pin ❗ in place of 📌, and its
-dialog can skip the checkout for that launch only, leaving the pin in place.
+unpredictable results, so the launch stops at the picker first, even a plain
+`claude`. The picker marks that pin ❗ in place of 📌, and its dialog can skip
+the checkout for that launch only, leaving the pin in place; `g` launches with
+it as it is.
 
 When a loaded pin's checkout holds the folder you start in, or sits inside it,
 rig sets `CLAUDE_CODE_AUTO_MODE_SERVER=0` for that session, since auto mode

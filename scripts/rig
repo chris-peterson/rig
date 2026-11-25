@@ -660,7 +660,7 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
             fail(f"{label(selected)} names plugins that aren't installed: {', '.join(current.missing)}. "
                  "Install them with `claude plugin install <plugin>`, or launch at a terminal to be asked.")
         chosen = [(offer.pin, offer.unasked) for offer in current.offered]
-    elif select:
+    elif select or any(offer.live and offer.selected for offer in current.offered):
         plan_for = lambda names, *more: plan(names, rigs, installed, pins, cwd, *more)
         notice, focus = "", None
         unsettled = bool(current.missing) or any(not offer.settled for offer in current.offered)
@@ -886,15 +886,32 @@ def grok_misses(home: Path, names: list[str]) -> list[str]:
     return [name for name in names if name not in found]
 
 
+def grok_slot():
+    """GROK-09: the first numbered grok home no running launch holds, with the open lock file that holds it until
+    the launch ends; a launch after it reuses the path, so a grant grok remembers for a pin's script still applies."""
+    import fcntl
+    root = rig_home() / "grok"
+    root.mkdir(parents=True, exist_ok=True)
+    slot = 1
+    while True:
+        lock = (root / f"{slot}.lock").open("w")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return root / str(slot), lock
+        except BlockingIOError:
+            lock.close()
+            slot += 1
+
+
 def run_grok(args: list[str], names: list[str], loaded: list[dict]) -> int:
-    """GROK-01..05: run Grok Build with a grok home of its own, holding the launch's plugins and pins, carry what
-    the session wrote back to the user's grok home, and return grok's exit status."""
+    """GROK-01..05, GROK-09: run Grok Build with a grok home of its own, holding the launch's plugins and pins, carry
+    what the session wrote back to the user's grok home, and return grok's exit status."""
     import shutil
     user = grok_home()
     config_file = user / "config.toml"
     original = config_file.read_text() if config_file.is_file() else None
     written = grok_config(original or "", names)
-    home = rig_home() / "grok" / str(os.getpid())
+    home, lock = grok_slot()
     if home.exists():
         shutil.rmtree(home)
     build_grok_home(home, user, written, loaded)
@@ -909,6 +926,7 @@ def run_grok(args: list[str], names: list[str], loaded: list[dict]) -> int:
             carry_back(home, user, original, written)
         finally:
             shutil.rmtree(home, ignore_errors=True)
+            lock.close()
 
 
 def run_app(app):
