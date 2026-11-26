@@ -39,7 +39,7 @@ suite:
       hooks: 'Hook wiring: SessionStart→cli-freshness, beacon-badge; modules→switch.'
       switch: module — /rig opens the --select picker inside the session, then relaunches the conversation with what you pick.
     commands:
-      install-rig: Put the rig command on PATH with tab completion and make claude run rig, or refresh them after a plugin update
+      install-rig: Put the rig command on PATH with tab completion and make claude (and grok, when it's on PATH) run rig, or refresh them after a plugin update
   # <<< shipyard:describe <<<
 
 docs:
