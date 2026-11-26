@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0
 
 - The beacon pane badge leads with the project's name, `rig · web ✦ docs`,
   since rig's badge takes the place of beacon's own project label.

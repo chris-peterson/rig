@@ -3,7 +3,7 @@
 # the marketplace SPA (the suite: block).
 
 name: rig
-version: 0.5.0
+version: 1.0.0
 description: "Switch Claude Code, or Grok Build, between named groups of plugins, and pin your local plugin checkouts in while you develop them."
 author: chris-peterson
 repository: https://github.com/chris-peterson/rig
