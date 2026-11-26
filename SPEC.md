@@ -38,14 +38,14 @@ below its category's heading, so every requirement has a linkable anchor
 
 ## Requirements
 
-### `DEF`
+### `DEFINE`
 Rig definitions
 
-#### `DEF-01`
+#### `DEFINE-01`
 The system shall read rig definitions from a user-level file, each naming the
 plugins it loads.
 
-#### `DEF-02`
+#### `DEFINE-02`
 If the rig definitions give a rig anything but plugins and rules, give the base
 rig rules, give a rule a condition other than `path` and `exists` or no
 condition at all, define a rig named `full` or `none`, or define no rig named
@@ -136,30 +136,6 @@ When the user runs `rig list --graph`, the system shall print a table of
 plugins against rigs, marking each rig that loads each plugin, listing the
 installed plugins no rig names after the rest, then any pinned plugin neither
 lists.
-
-_No RIG category: retired 2026-11-24, when its requirements moved to the categories
-they're about. The IDs are not reused._
-
-- RIG-01 moved to DEF-01
-- RIG-02 moved to COMPOSE-01
-- RIG-03 moved to COMPOSE-02
-- RIG-04 moved to CLAUDE-01
-- RIG-05 moved to COMPOSE-03
-- RIG-06 moved to COMPOSE-04
-- RIG-07 moved to LIST-01
-- RIG-08 moved to INSTALL-01
-- RIG-09 moved to INSTALL-02
-- RIG-10 moved to COMPOSE-05
-- RIG-11 moved to DEF-02
-- RIG-12 moved to CLAUDE-02
-- RIG-13 moved to LIST-02
-- RIG-14 moved to LIST-03
-- RIG-15 moved to COMPOSE-06
-- RIG-16 moved to COMPOSE-07
-- RIG-17 moved to COMPOSE-08
-- RIG-18 moved to RULE-01
-- RIG-19 moved to RULE-02
-- RIG-20 moved to RULE-03
 
 ### `SETUP`
 First-run setup
@@ -404,18 +380,19 @@ sandbox is Claude Code's. The ID is not reused._
 Launch
 
 #### `LAUNCH-01`
-The system shall pass every argument it does not consume to Claude Code
+The system shall pass every argument it does not consume to the tool
 unchanged.
 
 #### `LAUNCH-02`
 When a launch starts, the system shall print the rigs, the rule that made each
-rig a default, the pins, and the sandbox state before Claude Code starts.
+rig a default, the pins, and the sandbox state (Claude Code) or the tool's name
+(Grok Build) before the tool starts.
 
 #### `LAUNCH-03`
 When the user runs `rig` with arguments that start with an option or a prompt
 of more than one word, the system shall launch the default rig and pass the
-arguments to Claude Code; if they start with a single word that is neither
-rig's command nor Claude Code's, then the system shall refuse it as an unknown
+arguments to the tool; if they start with a single word that is neither
+rig's command nor the tool's, then the system shall refuse it as an unknown
 command.
 
 #### ~~`LAUNCH-04`~~

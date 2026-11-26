@@ -132,7 +132,7 @@ those plugins after the rigs: `rig: base + web + playwright@acme - sonar@acme`.
 [reference](/reference#the-picker) lists every key.
 
 A launch with arguments, plain `claude` included, opens the picker on its own
-only when it would load a pin whose checkout you're starting in, or under
+only when it would load a pin whose checkout you're starting in, or above
 ([Pins](/pins#working-inside-a-pinned-checkout) says why). Otherwise it installs
 the plugins the rigs need and loads your pins as the picker would have offered
 them.

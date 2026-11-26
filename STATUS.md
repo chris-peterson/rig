@@ -13,7 +13,7 @@ Maintained by `/sextant:spec-status`.
 
 | Prefix | Count | Status | Notes |
 |--------|------:|--------|-------|
-| DEF-01..02 | 2 | All Covered | `scripts/rig` (`load_config`, `check_rules`, `rule_problem`), tests in `tests/test_rig.py` |
+| DEFINE-01..02 | 2 | All Covered | `scripts/rig` (`load_config`, `check_rules`, `rule_problem`), tests in `tests/test_rig.py` |
 | COMPOSE-01..08 | 8 | All Covered | `scripts/rig` (`take_rigs`, `selection`, `plan`, `default_rigs`, `confirm_none`, `stock_args`), tests in `tests/test_rig.py`. Rigs are flat: `base` loads in every launch, the named rigs add to it, and `full` is every plugin installed for the working directory. COMPOSE-06 turns off every plugin Claude Code knows of in the overlay; a Grok Build launch enables none and loads no pins |
 | RULE-01..03 | 3 | All Covered | `scripts/rig` (`default_rigs`, `rule_match`, `path_matches`, `glob_pattern`, `repo_files`), tests in `tests/test_rig.py`. Rules match the resolved working directory and `$PWD`, and list a repo's files once per launch with `git ls-files --cached --others --exclude-standard`; the globs support `*`, `?`, and `**`, not bracket classes or GitLab's extglob braces |
 | INSTALL-01..02 | 2 | All Covered | `scripts/rig` (`install`, `claude_args`, `confirmation`), tests in `tests/test_rig.py`. Both tools install through `claude plugin install`, since Grok Build loads the plugins Claude Code installed |
@@ -43,7 +43,7 @@ STATUS.md updated: +1 ID (GROK-09, a reused grok home path so grok's remembered 
 ### 2026-11-24: Tools, and the RIG category decomposed
 
 STATUS.md updated: Grok Build support adds TOOL-01..05, CLAUDE-01..04, and
-GROK-01..08. RIG-01..20 retired as a category, moved to DEF, COMPOSE, RULE,
+GROK-01..08. RIG-01..20 retired as a category, moved to DEFINE, COMPOSE, RULE,
 INSTALL, LIST, and CLAUDE by what each is about; SANDBOX-01 moved to CLAUDE-04;
 PIN-11, LAUNCH-04, LAUNCH-16, SHELL-04, and SHELL-06 struck in place, moved to
 CLAUDE-03 and TOOL-03, -04, -05, -02. All Covered; coverage 114 of 114.

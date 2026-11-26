@@ -155,7 +155,7 @@ NONE = "none"  # stock Claude Code: no plugins at all, asked for at a terminal
 
 
 def load_config() -> dict | None:
-    """DEF-01, DEF-02: rigs.yml as {default, clones, rigs}, checked for shape; None when there is no file."""
+    """DEFINE-01, DEFINE-02: rigs.yml as {default, clones, rigs}, checked for shape; None when there is no file."""
     path = rigs_file()
     if not path.exists():
         return None
@@ -199,7 +199,7 @@ RULE_CONDITIONS = ("path", "exists")
 
 
 def check_rules(name: str, rig: dict, path: Path) -> None:
-    """DEF-02, RULE-01: a rig's rules as a list of mappings, each giving `path`, `exists`, or both."""
+    """DEFINE-02, RULE-01: a rig's rules as a list of mappings, each giving `path`, `exists`, or both."""
     rules = rig.get("rules")
     if rules is None:
         rig.pop("rules", None)
@@ -209,7 +209,7 @@ def check_rules(name: str, rig: dict, path: Path) -> None:
 
 
 def rule_problem(name: str, rules, where: str = "") -> str | None:
-    """DEF-02, EDITOR-15: what's wrong with a rig's rules, or None when they hold; `where` names the file."""
+    """DEFINE-02, EDITOR-15: what's wrong with a rig's rules, or None when they hold; `where` names the file."""
     if name == BASE:
         return f"rig {BASE}{where} has rules, but every launch loads {BASE}. Put the rules on another rig."
     if not isinstance(rules, list):
@@ -715,7 +715,7 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
 
 
 def confirm_none(selected: list[str], args: list[str]) -> None:
-    """COMPOSE-06..07: `none` goes alone, and only once the user at the terminal confirms it."""
+    """COMPOSE-07..08: `none` goes alone, and only once the user at the terminal confirms it."""
     if selected != [NONE]:
         fail(f"{NONE} launches {tool_name()} with no plugins, so it goes alone: rig use {NONE}")
     warning = (f"{NONE} launches stock {tool_name()}: no plugins at all, not the base rig's, and no pins. "
@@ -805,7 +805,7 @@ def grok_config(user_text: str, names: list[str]) -> str:
     import tomllib
     table = f"[plugins]\nenabled = [{', '.join(json.dumps(name) for name in names)}]\n"
     head = without_plugins_table(user_text)
-    text = f"{head}\n{table}" if head.strip() else table
+    text = head + table
     try:
         tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
@@ -1841,7 +1841,8 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
             with ScrollableContainer(id="scroll") as scroll:
                 scroll.can_focus = False
                 yield Picker()
-            yield Static(f"sandbox: {'on' if sandbox else 'off'}", id="sandbox")
+            if AGENT == CLAUDE:
+                yield Static(f"sandbox: {'on' if sandbox else 'off'}", id="sandbox")
             with Horizontal(id="bar"):
                 yield Footer()
                 yield Rocket()
@@ -3207,7 +3208,7 @@ _rig() {
     'pin:Use a local plugin checkout in place of the installed copy; bare pin pins this folder'
     'pins:List the pins'
     'unpin:Stop using a pinned checkout; bare unpin unpins this folder'
-    'install-cli:Put rig on PATH with completions, and make claude run rig'
+    'install-cli:Put rig on PATH with completions, and make claude and grok run rig'
     'doctor:Check the rig command, the claude function, and tab completion, then run claude doctor'
   )
   local ret=1
@@ -3456,7 +3457,8 @@ Commands:
   pins                       list the pins and how long each has been pinned
   unpin [<path|name>...]     stop using a pinned checkout; with no arguments, the one
                              this folder is in
-  install-cli                put rig on PATH with tab completion, and make claude run rig
+  install-cli                put rig on PATH with tab completion, and make claude run rig,
+                             and grok too when it's on PATH
   doctor                     check the rig command, the claude function, and tab completion
                              in a new zsh, then run Claude Code's doctor
 

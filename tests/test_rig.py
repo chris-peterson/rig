@@ -2850,10 +2850,6 @@ class CompletionParity(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 FAKE_GROK = textwrap.dedent('''\
     #!{python}
     import json, os, sys
@@ -3067,3 +3063,7 @@ class Grok(RigCase):
         found = subprocess.run(["zsh", "-ic", "whence -w grok"], capture_output=True, text=True,
                                env=self.env, stdin=subprocess.DEVNULL)
         self.assertIn("grok: function", found.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()
