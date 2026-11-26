@@ -1,9 +1,10 @@
 # rig
 
-A Claude Code plugin and CLI that launches Claude Code with a named set of
-plugins (a rig), the local plugin checkouts you've pinned, and the sandbox when
-a launch or a rig asks for it. What it does for a *user* lives on the docs site
-(https://chris-peterson.github.io/rig); this file is for working on rig itself.
+A Claude Code plugin and CLI that launches Claude Code, or Grok Build, with a
+named set of plugins (a rig), the local plugin checkouts you've pinned, and the
+sandbox when a launch or a rig asks for it. What it does for a *user* lives on
+the docs site (https://chris-peterson.github.io/rig); this file is for working
+on rig itself.
 
 rig is spec-driven. `SPEC.md` is the requirement source of record and
 `STATUS.md` its coverage ledger, both maintained with sextant

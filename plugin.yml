@@ -4,11 +4,11 @@
 
 name: rig
 version: 0.5.0
-description: "Switch Claude Code between named groups of plugins, and pin your local plugin checkouts in while you develop them."
+description: "Switch Claude Code, or Grok Build, between named groups of plugins, and pin your local plugin checkouts in while you develop them."
 author: chris-peterson
 repository: https://github.com/chris-peterson/rig
 icon: .claude-plugin/icon.svg
-keywords: [plugins, launcher, context, local-development, plugin-development, claude-code]
+keywords: [plugins, launcher, context, local-development, plugin-development, claude-code, grok]
 license: MIT
 
 validate:
@@ -39,7 +39,7 @@ suite:
       hooks: 'Hook wiring: SessionStart→cli-freshness, beacon-badge; modules→switch.'
       switch: module — /rig opens the --select picker inside the session, then relaunches the conversation with what you pick.
     commands:
-      install-rig: Put the rig command on PATH with tab completion and make claude run rig, or refresh them after a plugin update
+      install-rig: Put the rig command on PATH with tab completion and make claude (and grok, when it's on PATH) run rig, or refresh them after a plugin update
   # <<< shipyard:describe <<<
 
 docs:

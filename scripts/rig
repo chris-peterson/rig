@@ -3,7 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["pyyaml", "textual"]
 # ///
-"""Launch Claude Code with a named set of plugins (a rig)."""
+"""Launch Claude Code, or Grok Build, with a named set of plugins (a rig)."""
 
 from __future__ import annotations
 
@@ -54,18 +54,26 @@ def version_display() -> str:
 FLAG, VALUE, OPTIONAL, VALUES = "flag", "<value>", "[value]", "<values...>"  # what an option takes after it
 _CLAUDE_HELP: list[tuple[set[str], dict[str, str]]] = []
 
+CLAUDE, GROK = "claude", "grok"
+AGENT_NAMES = {CLAUDE: "Claude Code", GROK: "Grok Build"}
+AGENT = CLAUDE  # TOOL-01, TOOL-02: the tool this run launches; `rig grok` sets it
+
+
+def tool_name() -> str:
+    return AGENT_NAMES[AGENT]
+
 
 def claude_help() -> tuple[set[str], dict[str, str]]:
-    """The subcommand names `claude --help` lists, aliases included (`plugin|plugins`), and its options, short
-    and long (`-p`, `--print`), each with what it takes after it; read once a run."""
+    """The subcommand names the tool's `--help` lists, aliases included (`plugin|plugins`), and its options,
+    short and long (`-p`, `--print`), each with what it takes after it; read once a run."""
     if _CLAUDE_HELP:
         return _CLAUDE_HELP[0]
     try:
-        result = subprocess.run(["claude", "--help"], capture_output=True, text=True)
+        result = subprocess.run([AGENT, "--help"], capture_output=True, text=True)
     except FileNotFoundError:
-        fail("claude is not on PATH.")
+        fail(f"{AGENT} is not on PATH.")
     if result.returncode != 0:
-        fail(f"`claude --help` failed ({result.returncode}): {result.stderr.strip()}")
+        fail(f"`{AGENT} --help` failed ({result.returncode}): {result.stderr.strip()}")
     names, options, section = set(), {}, None
     for line in result.stdout.splitlines():
         if line.startswith(("Commands:", "Options:")):
@@ -73,7 +81,7 @@ def claude_help() -> tuple[set[str], dict[str, str]]:
             continue
         if section == "Commands" and (match := re.match(r"^  ([a-z][a-z|-]*)(?: |$)", line)):
             names.update(match.group(1).split("|"))
-        elif section == "Options" and (match := re.match(r"^  (-\S.*?)(?:  |$)", line)):
+        elif section == "Options" and (match := re.match(r"^ {2,8}(-\S.*?)(?:  |$)", line)):
             value = re.search(r"([<\[])[^>\]]*?(\.\.\.)?[>\]]", match.group(1))
             takes = FLAG if not value else VALUES if value.group(2) else VALUE if value.group(1) == "<" else OPTIONAL
             options.update(dict.fromkeys(re.findall(r"(?<![\w-])(--?[A-Za-z][\w-]*)", match.group(1)), takes))
@@ -85,25 +93,30 @@ def claude_subcommands() -> set[str]:
     return claude_help()[0]
 
 
+def rig_options() -> set[str]:
+    """The launch options rig takes for itself; for Grok Build, `--sandbox` is grok's own (GROK-06)."""
+    return {"--select"} if AGENT == GROK else {"--sandbox", "--select"}
+
+
 def refuse_unknown_options(args: list[str]) -> None:
-    """LAUNCH-16: stop a launch on an option neither rig nor Claude Code knows, before any picker opens, rather
-    than hand Claude Code an option it will refuse. Says nothing when `claude --help` lists no options."""
+    """TOOL-04: stop a launch on an option neither rig nor the tool knows, before any picker opens,
+    rather than hand the tool an option it will refuse. Says nothing when the tool's `--help` lists no options."""
     known = claude_help()[1]
     if not known:
         return
     end = args.index("--") if "--" in args else len(args)
     unknown = [arg for arg in args[:end] if arg.startswith("-") and arg != "-"
-               and arg.split("=")[0] not in {*known, "--sandbox", "--select"}]
+               and arg.split("=")[0] not in {*known, *rig_options()}]
     if unknown:
         hint = " For the graph: rig list --graph." if "--graph" in unknown else ""
-        fail(f"unknown option {', '.join(unknown)}; neither rig nor Claude Code takes it. See rig --help.{hint}")
+        fail(f"unknown option {', '.join(unknown)}; neither rig nor {tool_name()} takes it. See rig --help.{hint}")
 
 
 def exec_claude(args: list[str]) -> None:
     try:
-        os.execvp("claude", ["claude", *args])
+        os.execvp(AGENT, [AGENT, *args])
     except FileNotFoundError:
-        fail("claude is not on PATH.")
+        fail(f"{AGENT} is not on PATH.")
 
 
 def interactive(args: list[str]) -> bool:
@@ -142,7 +155,7 @@ NONE = "none"  # stock Claude Code: no plugins at all, asked for at a terminal
 
 
 def load_config() -> dict | None:
-    """RIG-01, RIG-11: rigs.yml as {default, clones, rigs}, checked for shape; None when there is no file."""
+    """DEFINE-01, DEFINE-02: rigs.yml as {default, clones, rigs}, checked for shape; None when there is no file."""
     path = rigs_file()
     if not path.exists():
         return None
@@ -186,7 +199,7 @@ RULE_CONDITIONS = ("path", "exists")
 
 
 def check_rules(name: str, rig: dict, path: Path) -> None:
-    """RIG-11, RIG-18: a rig's rules as a list of mappings, each giving `path`, `exists`, or both."""
+    """DEFINE-02, RULE-01: a rig's rules as a list of mappings, each giving `path`, `exists`, or both."""
     rules = rig.get("rules")
     if rules is None:
         rig.pop("rules", None)
@@ -196,7 +209,7 @@ def check_rules(name: str, rig: dict, path: Path) -> None:
 
 
 def rule_problem(name: str, rules, where: str = "") -> str | None:
-    """RIG-11, EDITOR-15: what's wrong with a rig's rules, or None when they hold; `where` names the file."""
+    """DEFINE-02, EDITOR-15: what's wrong with a rig's rules, or None when they hold; `where` names the file."""
     if name == BASE:
         return f"rig {BASE}{where} has rules, but every launch loads {BASE}. Put the rules on another rig."
     if not isinstance(rules, list):
@@ -236,7 +249,7 @@ def glob_pattern(glob: str) -> str:
 
 
 def path_matches(pattern: str, cwd: Path) -> bool:
-    """RIG-19: as git's `includeIf "gitdir/i:"` matches: no case, `~/` the home folder, a pattern not rooted at
+    """RULE-02: as git's `includeIf "gitdir/i:"` matches: no case, `~/` the home folder, a pattern not rooted at
     `/` or `~/` matching at any depth, and a trailing `/` matching the folder and all under it."""
     if pattern.startswith("~/"):
         pattern = str(Path.home().resolve()) + pattern[1:]
@@ -255,7 +268,7 @@ EXISTS_LIMIT = 10_000
 
 
 def repo_files(cwd: Path) -> list[str]:
-    """RIG-20: the files of cwd's git repository from its root, tracked or untracked and not ignored; outside a
+    """RULE-03: the files of cwd's git repository from its root, tracked or untracked and not ignored; outside a
     repository, the first EXISTS_LIMIT files under cwd."""
     try:
         root = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd, capture_output=True, text=True)
@@ -275,7 +288,7 @@ def repo_files(cwd: Path) -> list[str]:
 
 
 def rule_match(rule: dict, cwd: Path, files) -> str | None:
-    """RIG-18..20: what matched, `path ~/src/x/` or `exists **/*.tf`, when each of the rule's conditions does."""
+    """RULE-01..03: what matched, `path ~/src/x/` or `exists **/*.tf`, when each of the rule's conditions does."""
     matched = []
     if "path" in rule:
         if not path_matches(rule["path"], cwd):
@@ -292,7 +305,7 @@ def rule_match(rule: dict, cwd: Path, files) -> str | None:
 
 
 def default_rigs(config: dict, cwd: Path) -> dict[str, str | None]:
-    """RIG-06, RIG-18: the default rigs in cwd, each with the rule that made it one, or None for a listed one."""
+    """COMPOSE-04, RULE-01: the default rigs in cwd, each with the rule that made it one, or None for a listed one."""
     found = {name: None for name in config["default"]}
     listing: list[str] = []
 
@@ -343,7 +356,7 @@ def summary(current: Plan, sep: str = ": ") -> str:
 
 
 def take_rigs(args: list[str], rigs: dict) -> tuple[list[str], list[str]]:
-    """RIG-03: the rigs the leading arguments name, separated by spaces, commas, or both, and the arguments
+    """COMPOSE-02: the rigs the leading arguments name, separated by spaces, commas, or both, and the arguments
     after them."""
     names = set(rigs) | {FULL, NONE}
     taken: list[str] = []
@@ -370,7 +383,7 @@ PICKED = "picked"
 
 
 def plan(selected: list[str], rigs: dict, installed: set[str], pins: list[dict], cwd: Path, added: list[str] = (), removed: list[str] = ()) -> Plan:
-    """RIG-02, RIG-03, RIG-10, LAUNCH-11: the base rig's plugins, then each named rig's, without repeats, less
+    """COMPOSE-01, COMPOSE-02, COMPOSE-05, LAUNCH-11: the base rig's plugins, then each named rig's, without repeats, less
     the plugins taken out, then the plugins picked on their own; full adds every installed plugin."""
     removed = list(dict.fromkeys(removed))
     sources = {plugin_id: BASE for plugin_id in rigs[BASE]["plugins"] if plugin_id not in removed}
@@ -393,7 +406,7 @@ SANDBOX_SETTINGS = {"enabled": True, "failIfUnavailable": True, "allowUnsandboxe
 
 
 def take_flag(args: list[str], flag: str) -> tuple[bool, list[str]]:
-    """SANDBOX-01, LAUNCH-07: whether the flag appears before any `--`, and the arguments without it."""
+    """CLAUDE-04, LAUNCH-07: whether the flag appears before any `--`, and the arguments without it."""
     end = args.index("--") if "--" in args else len(args)
     head = [a for a in args[:end] if a != flag]
     return len(head) < end, head + args[end:]
@@ -409,7 +422,7 @@ def settings_files(cwd: Path) -> list[Path]:
 
 
 def project_off(cwd: Path) -> dict[str, Path]:
-    """RIG-04: each plugin a project settings file covering cwd sets to false, with that file. The nearest file
+    """CLAUDE-01: each plugin a project settings file covering cwd sets to false, with that file. The nearest file
     to name a plugin decides it, settings.local.json before settings.json, and the user's settings file is not
     a project's even when cwd is under the home folder."""
     user = user_settings_file().resolve()
@@ -428,7 +441,7 @@ def project_off(cwd: Path) -> dict[str, Path]:
 
 
 def describe_project_off(left_off: dict[str, Path]) -> list[str]:
-    """RIG-04: the rig plugins a project kept out, grouped by the file that did."""
+    """CLAUDE-01: the rig plugins a project kept out, grouped by the file that did."""
     by_file: dict[Path, list[str]] = {}
     for plugin_id, path in left_off.items():
         by_file.setdefault(path, []).append(plugin_id)
@@ -463,7 +476,7 @@ def known_plugin_ids(cwd: Path) -> set[str]:
 
 
 def overlay(rig_ids: list[str], pinned: set[str], known: set[str], sandbox: bool, removed: list[str] = ()) -> dict:
-    """RIG-04, PIN-08, SANDBOX-01, LAUNCH-11: settings that enable the rig's plugins, turn off the installed copy
+    """CLAUDE-01, PIN-08, CLAUDE-04, LAUNCH-11: settings that enable the rig's plugins, turn off the installed copy
     of each loaded pin and each plugin taken out in the picker, and turn on the sandbox with no unsandboxed
     commands when asked.
 
@@ -476,7 +489,7 @@ def overlay(rig_ids: list[str], pinned: set[str], known: set[str], sandbox: bool
 
 
 def install(plugins: list[str]) -> None:
-    """RIG-08: install the plugins the launch needs, once the user at the terminal launches."""
+    """INSTALL-01: install the plugins the launch needs, once the user at the terminal launches."""
     for plugin in plugins:
         if subprocess.run(["claude", "plugin", "install", plugin]).returncode != 0:
             fail(f"`claude plugin install {plugin}` failed; launch refused.")
@@ -486,13 +499,13 @@ AUTO_MODE_SERVER = "CLAUDE_CODE_AUTO_MODE_SERVER"
 
 
 def pinned_here(pin: dict, cwd: Path) -> bool:
-    """PIN-07, PIN-11: whether the pin's checkout holds the working directory or sits inside it."""
+    """PIN-07, CLAUDE-03: whether the pin's checkout holds the working directory or sits inside it."""
     cwd, checkout = cwd.resolve(), Path(pin["path"]).resolve()
     return cwd.is_relative_to(checkout) or checkout.is_relative_to(cwd)
 
 
 def auto_mode_server_off(loaded: list[dict], cwd: Path) -> list[str]:
-    """PIN-11: the launch-summary line when this launch turns the auto mode server off, else nothing."""
+    """CLAUDE-03: the launch-summary line when this launch turns the auto mode server off, else nothing."""
     here = [pin["plugin"] for pin in loaded if pinned_here(pin, cwd)]
     if not here or AUTO_MODE_SERVER in os.environ:
         return []
@@ -522,10 +535,10 @@ def ensure_config(args: list[str]) -> dict:
 
 
 def launch(selected: list[str] | None, args: list[str]) -> None:
-    """RIG-06, LAUNCH-06, SANDBOX-01, SWITCH-06: launch the base rig with the named rigs, or the default ones; at a
+    """COMPOSE-04, LAUNCH-06, CLAUDE-04, SWITCH-06: launch the base rig with the named rigs, or the default ones; at a
     terminal, stay Claude Code's parent so a switch can relaunch the conversation with other rigs."""
     refuse_unknown_options(args)
-    sandbox_flag, args = take_flag(args, "--sandbox")
+    sandbox_flag, args = take_flag(args, "--sandbox") if AGENT == CLAUDE else (False, args)
     select_flag, args = take_flag(args, "--select")
     if select_flag and not interactive(args):
         fail("--select opens a picker, so it needs a terminal; name the rigs instead: rig use <rig>...")
@@ -537,6 +550,9 @@ def launch(selected: list[str] | None, args: list[str]) -> None:
     if selected is None:
         reasons = default_rigs(config, Path.cwd())
         selected = list(reasons)
+    if AGENT == GROK:
+        _selected, arguments, chose = claude_args(selected, args, False, select_flag, reasons)
+        raise SystemExit(run_grok(arguments, chose["enabled"], chose["loaded"]))
     if not interactive(args):
         exec_claude(claude_args(selected, args, sandbox_flag, reasons=reasons)[1])
     request = switch_file()
@@ -616,7 +632,7 @@ def confirmation(current: Plan, rows: list[str]) -> tuple[str, str | None]:
 
 def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select: bool = False, reasons: dict = {},
                 picks: dict | None = None) -> tuple[list[str], list[str], dict]:
-    """RIG-04, RIG-08, RIG-09, RIG-12, PIN-10, PIN-15, LAUNCH-01..02, LAUNCH-05, LAUNCH-07, SWITCH-02: the rigs
+    """CLAUDE-01, INSTALL-01, INSTALL-02, CLAUDE-02, PIN-10, PIN-15, LAUNCH-01..02, LAUNCH-05, LAUNCH-07, SWITCH-02: the rigs
     the launch uses, the arguments that start Claude Code with them once their plugins are installed and the pins chosen,
     and what was picked beyond the rigs. The reasons are the rules that made rigs defaults, for the ones still
     chosen; the picks are a switch's, chosen in the session, so the launch doesn't ask again."""
@@ -626,6 +642,11 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
     if unknown:
         fail(f"no rig named {', '.join(unknown)}. Rigs: {', '.join(rig_order(rigs))}")
     if NONE in selected:
+        if AGENT == GROK:
+            confirm_none(selected, args)
+            print(f"rig: {NONE}, no plugins", *describe_pins([(pin, False) for pin in read_pins()]),
+                  f"tool: {tool_name()}", sep="\n", file=sys.stderr)
+            return selected, args, {"added": [], "removed": [], "pins": {}, "enabled": [], "loaded": []}
         return selected, stock_args(selected, args, sandbox_flag), {"added": [], "removed": [], "pins": {}}
     cwd = Path.cwd()
     installed = installed_for(cwd)
@@ -639,7 +660,7 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
             fail(f"{label(selected)} names plugins that aren't installed: {', '.join(current.missing)}. "
                  "Install them with `claude plugin install <plugin>`, or launch at a terminal to be asked.")
         chosen = [(offer.pin, offer.unasked) for offer in current.offered]
-    elif select:
+    elif select or any(offer.live and offer.selected for offer in current.offered):
         plan_for = lambda names, *more: plan(names, rigs, installed, pins, cwd, *more)
         notice, focus = "", None
         unsettled = bool(current.missing) or any(not offer.settled for offer in current.offered)
@@ -668,8 +689,15 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
         chosen = [(offer.pin, offer.selected) for offer in current.offered]
     plugins = list(current.sources)
     install(current.missing)
-    turned_off = [p for p in turn_off_user_plugins() if p not in plugins]
     loaded = [pin for pin, load in chosen if load]
+    chose = {"added": current.added, "removed": current.removed, "pins": {pin["path"]: load for pin, load in chosen}}
+    if AGENT == GROK:
+        alone = {offer.pin["path"] for offer in current.offered if offer.alone}
+        print(f"rig: {summary(current, ', ')}", *describe_rules(reasons, selected), *describe_pins(chosen, cwd, alone),
+              f"tool: {tool_name()}", sep="\n", file=sys.stderr)
+        names = [p.split("@")[0] for p in plugins] + [pin["plugin"] for pin in loaded]
+        return selected, args, {**chose, "enabled": list(dict.fromkeys(names)), "loaded": loaded}
+    turned_off = [p for p in turn_off_user_plugins() if p not in plugins]
     replaced = {pin["plugin"] for pin in loaded}
     enabled = [p for p in plugins if p.split("@")[0] not in replaced]
     off = project_off(cwd)
@@ -683,16 +711,14 @@ def claude_args(selected: list[str], args: list[str], sandbox_flag: bool, select
           f"sandbox: {'on' if sandbox_flag else 'off'}", sep="\n", file=sys.stderr)
     plugin_dirs = [arg for pin in loaded for arg in ("--plugin-dir", pin["path"])]
     settings = overlay(enabled, replaced, known_plugin_ids(cwd), sandbox_flag, current.removed)
-    chose = {"added": current.added, "removed": current.removed, "pins": {pin["path"]: load for pin, load in chosen}}
     return selected, ["--settings", json.dumps(settings), *plugin_dirs, *args], chose
 
 
-def stock_args(selected: list[str], args: list[str], sandbox_flag: bool) -> list[str]:
-    """RIG-15..17: Claude Code with every plugin it knows of turned off, pins and the base rig's included, once
-    the user at the terminal confirms it."""
+def confirm_none(selected: list[str], args: list[str]) -> None:
+    """COMPOSE-07..08: `none` goes alone, and only once the user at the terminal confirms it."""
     if selected != [NONE]:
-        fail(f"{NONE} launches Claude Code with no plugins, so it goes alone: rig use {NONE}")
-    warning = (f"{NONE} launches stock Claude Code: no plugins at all, not the base rig's, and no pins. "
+        fail(f"{NONE} launches {tool_name()} with no plugins, so it goes alone: rig use {NONE}")
+    warning = (f"{NONE} launches stock {tool_name()}: no plugins at all, not the base rig's, and no pins. "
                "The hooks, skills, and guardrails they bring won't be there.")
     if not interactive(args):
         fail(f"{warning} It needs someone at a terminal to confirm it.")
@@ -700,6 +726,12 @@ def stock_args(selected: list[str], args: list[str], sandbox_flag: bool) -> list
     sys.stderr.flush()
     if sys.stdin.readline().strip().lower() not in ("y", "yes"):
         fail("launch cancelled.")
+
+
+def stock_args(selected: list[str], args: list[str], sandbox_flag: bool) -> list[str]:
+    """COMPOSE-06..08: Claude Code with every plugin it knows of turned off, pins and the base rig's included, once
+    the user at the terminal confirms it."""
+    confirm_none(selected, args)
     cwd = Path.cwd()
     print(f"rig: {NONE}, no plugins", *describe_pins([(pin, False) for pin in read_pins()]),
           f"sandbox: {'on' if sandbox_flag else 'off'}", sep="\n", file=sys.stderr)
@@ -729,14 +761,14 @@ def take_switch(path: Path) -> dict | None:
 
 
 def run_claude(args: list[str], env: dict[str, str]) -> int:
-    """LAUNCH-06: run Claude Code as a child, leaving Ctrl-C to it, and return its exit status.
+    """LAUNCH-06: run the tool as a child, leaving Ctrl-C to it, and return its exit status.
 
     The handlers are Python functions rather than SIG_IGN, since an ignored signal stays ignored across exec."""
     import signal
     try:
-        child = subprocess.Popen(["claude", *args], env={**os.environ, **env})
+        child = subprocess.Popen([AGENT, *args], env={**os.environ, **env})
     except FileNotFoundError:
-        fail("claude is not on PATH.")
+        fail(f"{AGENT} is not on PATH.")
     forward = lambda signum, _frame: child.send_signal(signum)
     previous = {sig: signal.signal(sig, handler) for sig, handler in (
         (signal.SIGINT, lambda *_: None), (signal.SIGQUIT, lambda *_: None),
@@ -747,6 +779,154 @@ def run_claude(args: list[str], env: dict[str, str]) -> int:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
     return 128 - status if status < 0 else status
+
+
+PLUGINS_TABLE = re.compile(r"(?ms)^\[plugins(?:\.[^\]\n]*)?\][^\n]*(?:\n|\Z).*?(?=^\[|\Z)")
+
+
+def grok_home() -> Path:
+    """The user's grok home: $GROK_HOME, else ~/.grok."""
+    return Path(os.environ.get("GROK_HOME") or Path.home() / ".grok").expanduser()
+
+
+def without_plugins_table(text: str) -> str:
+    """GROK-02: a config.toml's text with its `[plugins]` table, and any `[plugins.*]` table, taken out."""
+    text = PLUGINS_TABLE.sub("", text)
+    return text if not text or text.endswith("\n") else text + "\n"
+
+
+def plugins_table(text: str) -> str:
+    """GROK-04: the `[plugins]` tables of a config.toml's text, as written there."""
+    return "".join(match.group(0) for match in PLUGINS_TABLE.finditer(text))
+
+
+def grok_config(user_text: str, names: list[str]) -> str:
+    """GROK-02: the user's config.toml with a `[plugins]` table that enables the launch's plugins and no others."""
+    import tomllib
+    table = f"[plugins]\nenabled = [{', '.join(json.dumps(name) for name in names)}]\n"
+    head = without_plugins_table(user_text)
+    text = head + table
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        fail(f"can't write grok's plugins into {display(grok_home() / 'config.toml')}: {error}")
+    return text
+
+
+def link_entries(source: Path, target: Path, skip: set[str] = frozenset()) -> None:
+    """GROK-01, GROK-03: link each entry of the source folder into the target folder, by name."""
+    if not source.is_dir():
+        return
+    for entry in source.iterdir():
+        if entry.name not in skip:
+            (target / entry.name).symlink_to(entry)
+
+
+def build_grok_home(home: Path, user: Path, config: str, loaded: list[dict]) -> None:
+    """GROK-01..03: a grok home for one launch: the user's, linked entry by entry, with the launch's config.toml,
+    and a plugins folder that links the user's plugins and each loaded pin's checkout under its plugin's name."""
+    home.mkdir(parents=True)
+    link_entries(user, home, {"config.toml", "plugins"})
+    (home / "plugins").mkdir()
+    link_entries(user / "plugins", home / "plugins")
+    for pin in loaded:
+        link = home / "plugins" / pin["plugin"]
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(Path(pin["path"]))
+    (home / "config.toml").write_text(config)
+
+
+def carry_back(home: Path, user: Path, original: str | None, written: str) -> None:
+    """GROK-04, GROK-05: put what the session wrote in the launch's grok home back in the user's: config.toml with
+    the user's own `[plugins]` table, unless the user's changed meanwhile, and each entry the session created or
+    replaced in place of a link."""
+    import shutil
+    user.mkdir(parents=True, exist_ok=True)
+    session = (home / "config.toml").read_text() if (home / "config.toml").is_file() else written
+    if session != written:
+        merged = without_plugins_table(session) + plugins_table(original or "")
+        target = user / "config.toml"
+        now = target.read_text() if target.is_file() else None
+        if now == original:
+            target.write_text(merged)
+        else:
+            kept = user / f"config.toml.rig-{os.getpid()}"
+            kept.write_text(merged)
+            print(f"{PROG}: {display(target)} changed while grok ran, so it's left as is; the session's settings "
+                  f"are in {display(kept)}", file=sys.stderr)
+    for folder, into in ((home, user), (home / "plugins", user / "plugins")):
+        if not folder.is_dir():
+            continue
+        for entry in folder.iterdir():
+            if entry.is_symlink() or (folder == home and entry.name in ("config.toml", "plugins")):
+                continue
+            target = into / entry.name
+            into.mkdir(parents=True, exist_ok=True)
+            if target.is_dir() and not target.is_symlink():
+                if entry.is_dir():
+                    print(f"{PROG}: grok made {display(target)} anew in a rig launch; the user's copy is kept, and "
+                          f"the session's is dropped", file=sys.stderr)
+                    continue
+                shutil.rmtree(target)
+            elif target.is_symlink() or target.exists():
+                target.unlink()
+            shutil.move(str(entry), str(target))
+
+
+def grok_misses(home: Path, names: list[str]) -> list[str]:
+    """GROK-08: the launch's plugins `grok inspect` doesn't report enabled in the launch's grok home; none when it
+    can't say."""
+    try:
+        result = subprocess.run([GROK, "inspect", "--json"], capture_output=True, text=True,
+                                env={**os.environ, "GROK_HOME": str(home)}, stdin=subprocess.DEVNULL, timeout=30)
+        found = {plugin["name"] for plugin in json.loads(result.stdout).get("plugins", []) if plugin.get("enabled")}
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, AttributeError, KeyError, TypeError):
+        return []
+    return [name for name in names if name not in found]
+
+
+def grok_slot():
+    """GROK-09: the first numbered grok home no running launch holds, with the open lock file that holds it until
+    the launch ends; a launch after it reuses the path, so a grant grok remembers for a pin's script still applies."""
+    import fcntl
+    root = rig_home() / "grok"
+    root.mkdir(parents=True, exist_ok=True)
+    slot = 1
+    while True:
+        lock = (root / f"{slot}.lock").open("w")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return root / str(slot), lock
+        except BlockingIOError:
+            lock.close()
+            slot += 1
+
+
+def run_grok(args: list[str], names: list[str], loaded: list[dict]) -> int:
+    """GROK-01..05, GROK-09: run Grok Build with a grok home of its own, holding the launch's plugins and pins, carry
+    what the session wrote back to the user's grok home, and return grok's exit status."""
+    import shutil
+    user = grok_home()
+    config_file = user / "config.toml"
+    original = config_file.read_text() if config_file.is_file() else None
+    written = grok_config(original or "", names)
+    home, lock = grok_slot()
+    if home.exists():
+        shutil.rmtree(home)
+    build_grok_home(home, user, written, loaded)
+    try:
+        missed = grok_misses(home, names)
+        if missed:
+            print(f"not loaded by grok, which doesn't find {'it' if len(missed) == 1 else 'them'}: "
+                  f"{', '.join(missed)}", file=sys.stderr)
+        return run_claude(args, {"GROK_HOME": str(home)})
+    finally:
+        try:
+            carry_back(home, user, original, written)
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+            lock.close()
 
 
 def run_app(app):
@@ -873,7 +1053,7 @@ def cmd_switch(args: list[str]) -> int:
 
 
 def cmd_use(args: list[str]) -> int:
-    """RIG-05."""
+    """COMPOSE-03."""
     if not args or args[0].startswith("-"):
         fail("use takes one or more rig names: rig use <rig>... [claude args...]")
     rigs = ensure_config(args)["rigs"]
@@ -884,7 +1064,7 @@ def cmd_use(args: list[str]) -> int:
 
 
 def cmd_list(args: list[str]) -> int:
-    """RIG-07, RIG-13, RIG-14."""
+    """LIST-01, LIST-02, LIST-03."""
     if args not in ([], ["--json"], ["--graph"]):
         fail("list takes --json or --graph.")
     config = load_config()
@@ -948,7 +1128,7 @@ Piece = tuple[str, int | None]
 
 
 class Graph(NamedTuple):
-    """RIG-14, LAUNCH-07: plugins down the side and rigs across the top, laid out once for `rig list --graph`
+    """LIST-03, LAUNCH-07: plugins down the side and rigs across the top, laid out once for `rig list --graph`
     and the picker. A row or the header is a list of pieces, each (text, column): column -1 is the plugin's
     name, 0.. a rig, and None the gap between them."""
     rigs: list[dict]
@@ -999,7 +1179,7 @@ def graph_of(rigs: list[dict], installed: list[str], pins: list[dict]) -> Graph:
 
 
 def graph(rigs: list[dict], installed: list[str], pins: list[dict] = ()) -> str:
-    """RIG-14: plugins down the side, rigs across the top, a dot where a rig loads the plugin."""
+    """LIST-03: plugins down the side, rigs across the top, a dot where a rig loads the plugin."""
     return graph_of(rigs, installed, list(pins)).text()
 
 
@@ -1661,7 +1841,8 @@ def select_app(plan_for, columns: list[dict], installed: list[str], pins: list[d
             with ScrollableContainer(id="scroll") as scroll:
                 scroll.can_focus = False
                 yield Picker()
-            yield Static(f"sandbox: {'on' if sandbox else 'off'}", id="sandbox")
+            if AGENT == CLAUDE:
+                yield Static(f"sandbox: {'on' if sandbox else 'off'}", id="sandbox")
             with Horizontal(id="bar"):
                 yield Footer()
                 yield Rocket()
@@ -1858,7 +2039,7 @@ def enabled_plugins() -> list[str]:
 
 
 def turn_off_user_plugins() -> list[str]:
-    """RIG-12: set each plugin the user's settings enable to false, returning those plugins.
+    """CLAUDE-02: set each plugin the user's settings enable to false, returning those plugins.
 
     Edits the text rather than re-serializing, so the file's layout and its blank-line groups (SETUP-04a)
     survive."""
@@ -2846,12 +3027,12 @@ def install_completions() -> None:
     zshrc.write_text("".join(lines))
 
 
-def claude_function_origin() -> str | None:
-    """The file that defines a `claude` shell function in a new interactive zsh, or None."""
-    result = subprocess.run(["zsh", "-ic", "whence -v claude"], capture_output=True, text=True,
+def claude_function_origin(name: str = CLAUDE) -> str | None:
+    """The file that defines a shell function by this name (`claude`) in a new interactive zsh, or None."""
+    result = subprocess.run(["zsh", "-ic", f"whence -v {name}"], capture_output=True, text=True,
                             stdin=subprocess.DEVNULL)
     last = (result.stdout.strip().splitlines() or [""])[-1]
-    match = re.match(r"^claude is a shell function(?: from (.+))?$", last)
+    match = re.match(rf"^{name} is a shell function(?: from (.+))?$", last)
     if not match:
         return None
     return match.group(1) or "an unknown file"
@@ -2867,16 +3048,35 @@ _rig_compdef_claude() {{
 }}
 add-zsh-hook precmd _rig_compdef_claude
 """
+GROK_SNIPPET_TEXT = 'grok() { rig grok "$@" }\n'
+
+
+def ours(origin: str | None) -> bool:
+    """Whether no shell function defines the name, or rig's snippet does."""
+    return not origin or Path(origin).expanduser() == SNIPPET
 
 
 def install_claude_function() -> None:
-    """SHELL-04: make `claude` run rig, unless another shell function already defines claude."""
+    """TOOL-05: make `claude` run rig, unless another shell function already defines claude, and
+    `grok` too where grok is on PATH and no other shell function defines it."""
+    import shutil
     origin = claude_function_origin()
-    if origin and Path(origin).expanduser() != SNIPPET:
+    text = ""
+    if ours(origin):
+        text = SNIPPET_TEXT
+    else:
         print(f"  · claude is a shell function from {origin}; left as is")
+    if shutil.which(GROK):
+        grok_origin = claude_function_origin(GROK)
+        if ours(grok_origin):
+            text = (text or f"{SNIPPET_SENTINEL}: written by `rig install-cli`.\n") + GROK_SNIPPET_TEXT
+            print("  ✓ grok runs rig from new shells")
+        else:
+            print(f"  · grok is a shell function from {grok_origin}; left as is")
+    if not text:
         return
     make_zsh_dir(SNIPPET.parent)
-    SNIPPET.write_text(SNIPPET_TEXT)
+    SNIPPET.write_text(text)
     zshrc = Path.home() / ".zshrc"
     content = zshrc.read_text() if zshrc.exists() else ""
     if SNIPPET_SENTINEL in content:
@@ -2890,7 +3090,7 @@ def install_claude_function() -> None:
 
 
 def cmd_install_cli(args: list[str]) -> int:
-    """SHELL-01, SHELL-04."""
+    """SHELL-01, TOOL-05."""
     if args:
         fail(f"install-cli takes no arguments, not {' '.join(args)}")
     import shutil
@@ -3008,7 +3208,7 @@ _rig() {
     'pin:Use a local plugin checkout in place of the installed copy; bare pin pins this folder'
     'pins:List the pins'
     'unpin:Stop using a pinned checkout; bare unpin unpins this folder'
-    'install-cli:Put rig on PATH with completions, and make claude run rig'
+    'install-cli:Put rig on PATH with completions, and make claude and grok run rig'
     'doctor:Check the rig command, the claude function, and tab completion, then run claude doctor'
   )
   local ret=1
@@ -3175,7 +3375,7 @@ def check_claude_runs_rig(probe: dict[str, str]) -> Check:
         where = display(origin) if origin else "an unknown file"
         return (False, f"claude is a shell function from {where}",
                 f"remove that claude function, then {FIX_INSTALL}")
-    if SNIPPET.read_text() != SNIPPET_TEXT:
+    if SNIPPET.read_text() not in (SNIPPET_TEXT, SNIPPET_TEXT + GROK_SNIPPET_TEXT):
         return False, f"{display(SNIPPET)} is out of date", FIX_INSTALL
     return True, f"claude runs rig ({display(SNIPPET)})", ""
 
@@ -3241,6 +3441,7 @@ def cmd_doctor(args: list[str]) -> int:
 USAGE = f"""usage: rig                              pick the rigs and pins, then launch (as --select)
        rig <command> [<args>...]
        rig <claude args>...            launch Claude Code with the default rigs
+       rig grok [<args>...]            the same for Grok Build
 
 Commands:
   use <rig>... [<claude args>]
@@ -3256,7 +3457,8 @@ Commands:
   pins                       list the pins and how long each has been pinned
   unpin [<path|name>...]     stop using a pinned checkout; with no arguments, the one
                              this folder is in
-  install-cli                put rig on PATH with tab completion, and make claude run rig
+  install-cli                put rig on PATH with tab completion, and make claude run rig,
+                             and grok too when it's on PATH
   doctor                     check the rig command, the claude function, and tab completion
                              in a new zsh, then run Claude Code's doctor
 
@@ -3264,7 +3466,9 @@ Anything else goes to Claude Code: its subcommands run unchanged, and its option
 and a prompt start a session with the default rigs. rig refuses a word that is
 neither command, and an option neither takes; put a one-word prompt after `--`. The install makes `claude` run
 `rig claude`, which does the same, and launches the default rigs when given no
-arguments. `rig rig <command>` is the same as `rig <command>`.
+arguments. `rig rig <command>` is the same as `rig <command>`. `rig grok` does the
+same for Grok Build, giving each launch a grok home of its own; `--sandbox` there is
+grok's.
 
   --sandbox                  with a launch: run Bash in Claude Code's sandbox without
                              prompting, failing if it's unavailable and allowing no
@@ -3304,8 +3508,10 @@ def bare() -> int:
 
 
 def main(argv: list[str]) -> int:
-    as_claude = argv[:1] == ["claude"]
+    global AGENT
+    as_claude = argv[:1] in (["claude"], ["grok"])
     if as_claude:
+        AGENT = argv[0]
         argv = argv[1:]
     if argv[:1] == ["rig"]:
         argv = argv[1:]

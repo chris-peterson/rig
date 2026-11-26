@@ -27,6 +27,9 @@ If another shell function already defines `claude` (a wrapper of your own),
 rig leaves it alone. Have that wrapper call `rig claude "$@"` where it called
 `claude`.
 
+When [Grok Build](/tools) is on your PATH, the install makes `grok` run
+`rig grok` the same way.
+
 To check the setup, open a new shell and run:
 
 ```bash
@@ -41,7 +44,7 @@ checks, so `claude doctor` reports both.
 ## Before you adopt it
 
 !> **rig turns off the plugins your Claude Code settings enable.** Every
-launch through rig sets each plugin `~/.claude/settings.json` enables to off,
+Claude Code launch through rig sets each plugin `~/.claude/settings.json` enables to off,
 so a session starts with exactly the rigs you chose. Claude Code started some
 other way (an IDE extension, the desktop app) reads the same settings file, so
 it starts without those plugins.

@@ -1,7 +1,7 @@
 # rig
 
-Switch Claude Code between named groups of plugins, and pin your local plugin
-checkouts in while you develop them.
+Switch Claude Code, or Grok Build, between named groups of plugins, and pin
+your local plugin checkouts in while you develop them.
 
 → **[Docs](https://chris-peterson.github.io/rig)**
 

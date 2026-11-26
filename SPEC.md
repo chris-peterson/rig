@@ -1,8 +1,8 @@
 # rig specification
 
-rig launches Claude Code with a chosen set of plugins (a rig), loads pinned
-local plugin checkouts into every launch, and can run the session inside
-Claude Code's sandbox.
+rig launches Claude Code, or Grok Build, with a chosen set of plugins (a rig),
+loads pinned local plugin checkouts into every launch, and can run a Claude
+Code session inside Claude Code's sandbox.
 
 Requirements use [EARS syntax](https://alistairmavin.com/ears). Each is one of:
 Ubiquitous (`The <system> shall …`), State-Driven (`While …`), Event-Driven
@@ -19,7 +19,7 @@ below its category's heading, so every requirement has a linkable anchor
 - **base rig**: the rig named `base`, which every launch loads. First-run setup
   creates it from the plugins you want in every session.
 - **full**: a rig that rig provides, holding every installed plugin.
-- **none**: a preset that rig provides, launching stock Claude Code with no
+- **none**: a preset that rig provides, launching the tool as it ships, with no
   plugins at all.
 - **default rigs**: the rigs a launch adds to the base rig when it names none:
   the rigs listed as defaults, and the rigs whose rules match the working
@@ -31,109 +31,111 @@ below its category's heading, so every requirement has a linkable anchor
   before a marketplace release.
 - **sandbox**: Claude Code's sandbox for Bash commands, which a launch can turn
   on.
-- **launch**: one start of Claude Code through rig.
+- **launch**: one start of a tool through rig.
+- **tool**: the coding agent a launch starts: Claude Code, or Grok Build when
+  the launch is `rig grok`.
 - **switch**: moving a session to other rigs, carrying its conversation over.
 
 ## Requirements
 
-### `RIG`
-Rigs
+### `DEFINE`
+Rig definitions
 
-#### `RIG-01`
+#### `DEFINE-01`
 The system shall read rig definitions from a user-level file, each naming the
 plugins it loads.
 
-#### `RIG-02`
-The system shall load the base rig's plugins in every launch, along with the
-plugins of each rig the launch names.
-
-#### `RIG-03`
-When a launch names several rigs, separated by spaces, commas, or both, the
-system shall load the plugins of all of them.
-
-#### `RIG-04`
-When a launch uses rigs, the system shall start Claude Code with their
-plugins enabled for that session, setting no other plugin's state apart from
-pins, so a plugin enabled during the session loads. A rig plugin that a project
-settings file covering the working directory sets to `false` is left to the
-settings files and named on the launch summary, unless the user picked it on
-its own; a `false` in the user's settings file does not keep it out.
-
-#### `RIG-05`
-When the user runs `rig use <rig>...`, the system shall launch Claude Code with
-the base rig and the named rigs.
-
-#### `RIG-06`
-When a launch names no rig, the system shall launch Claude Code with the base
-rig and the default rigs.
-
-#### `RIG-07`
-When the user runs `rig list`, the system shall list each rig with its plugins,
-marking the base rig and the default rigs, and naming the rule that makes a rig
-a default in the working directory.
-
-#### `RIG-08`
-If a rig names a plugin that is not installed, then the system shall install
-it once an interactive launch goes ahead; where the picker is open, it shall
-mark the plugin there and refuse the launch if the user cancels.
-
-#### `RIG-09`
-If a rig names a plugin that is not installed and no one is at a terminal to
-confirm, then the system shall refuse the launch, naming the plugin.
-
-#### `RIG-10`
-The system shall provide a rig named `full` that loads every installed plugin.
-
-#### `RIG-11`
+#### `DEFINE-02`
 If the rig definitions give a rig anything but plugins and rules, give the base
 rig rules, give a rule a condition other than `path` and `exists` or no
 condition at all, define a rig named `full` or `none`, or define no rig named
 `base`, then the system shall refuse the launch, saying which.
 
-#### `RIG-13`
-When the user runs `rig list --json`, the system shall print the rigs, their
-plugins and rules, and the default rigs as JSON.
+### `COMPOSE`
+Which rigs a launch loads
 
-#### `RIG-14`
-When the user runs `rig list --graph`, the system shall print a table of
-plugins against rigs, marking each rig that loads each plugin, listing the
-installed plugins no rig names after the rest, then any pinned plugin neither
-lists.
+#### `COMPOSE-01`
+The system shall load the base rig's plugins in every launch, along with the
+plugins of each rig the launch names.
 
-#### `RIG-15`
-When a launch names `none`, the system shall start Claude Code with every
+#### `COMPOSE-02`
+When a launch names several rigs, separated by spaces, commas, or both, the
+system shall load the plugins of all of them.
+
+#### `COMPOSE-03`
+When the user runs `rig use <rig>...`, the system shall launch the tool with
+the base rig and the named rigs.
+
+#### `COMPOSE-04`
+When a launch names no rig, the system shall launch the tool with the base
+rig and the default rigs.
+
+#### `COMPOSE-05`
+The system shall provide a rig named `full` that loads every installed plugin.
+
+#### `COMPOSE-06`
+When a launch names `none`, the system shall start the tool with every
 plugin it knows of turned off, the base rig's and pinned plugins' included.
 
-#### `RIG-16`
+#### `COMPOSE-07`
 When a launch names `none`, the system shall say what the session goes without
 and launch only once the user at the terminal confirms.
 
-#### `RIG-17`
+#### `COMPOSE-08`
 If a launch names `none` along with other rigs, or no one is at a terminal to
 confirm it, then the system shall refuse the launch.
 
-#### `RIG-18`
+### `RULE`
+Folder rules
+
+#### `RULE-01`
 Where a rig has rules, the system shall make it a default rig in a working
 directory where any of its rules matches, a rule matching when each of its
 conditions does.
 
-#### `RIG-19`
+#### `RULE-02`
 When a rule gives a `path`, the system shall match the working directory against
 it as git's `includeIf "gitdir/i:"` matches its pattern: ignoring case, `~/`
 standing for the home folder, a pattern that doesn't start with `/` or `~/`
 matching at any depth, `**` spanning folders, and a trailing `/` matching the
 folder and everything under it.
 
-#### `RIG-20`
+#### `RULE-03`
 When a rule gives `exists`, the system shall match it when a file that matches
 one of its globs, from the root of the working directory's git repository,
 is tracked there or untracked and not ignored, as GitLab CI's `rules:exists`
 matches; outside a repository, when one of the first 10,000 files under the
 working directory matches.
 
-#### `RIG-12`
-When a launch starts, the system shall turn off each plugin the user's Claude
-Code settings file enables, naming the ones the launch's rigs don't include.
+### `INSTALL`
+Rig plugins not yet installed
+
+#### `INSTALL-01`
+If a rig names a plugin that is not installed, then the system shall install
+it once an interactive launch goes ahead; where the picker is open, it shall
+mark the plugin there and refuse the launch if the user cancels.
+
+#### `INSTALL-02`
+If a rig names a plugin that is not installed and no one is at a terminal to
+confirm, then the system shall refuse the launch, naming the plugin.
+
+### `LIST`
+Listing the rigs
+
+#### `LIST-01`
+When the user runs `rig list`, the system shall list each rig with its plugins,
+marking the base rig and the default rigs, and naming the rule that makes a rig
+a default in the working directory.
+
+#### `LIST-02`
+When the user runs `rig list --json`, the system shall print the rigs, their
+plugins and rules, and the default rigs as JSON.
+
+#### `LIST-03`
+When the user runs `rig list --graph`, the system shall print a table of
+plugins against rigs, marking each rig that loads each plugin, listing the
+installed plugins no rig names after the rest, then any pinned plugin neither
+lists.
 
 ### `SETUP`
 First-run setup
@@ -315,15 +317,17 @@ If a launch's rigs do not include a pinned plugin that has a copy installed
 for the working directory and no one is at a terminal to ask, then the system
 shall launch without that pin.
 
-#### `PIN-11`
-Where a launch loads a pin whose checkout holds the working directory or sits
-inside it, the system shall start Claude Code with
-`CLAUDE_CODE_AUTO_MODE_SERVER=0`, unless the environment already sets it, and
-say so before Claude Code starts.
+#### ~~`PIN-11`~~
+~~Where a launch loads a pin whose checkout holds the working directory or sits~~
+~~inside it, the system shall start Claude Code with~~
+~~`CLAUDE_CODE_AUTO_MODE_SERVER=0`, unless the environment already sets it, and~~
+~~say so before Claude Code starts.~~
 
-> Rationale: works around anthropics/claude-code#95982 by putting auto mode on
-> its billed classifier fallback. Claude Code 2.1.327 announced that fallback's
-> removal, so this requirement expires with it; retire it once #95982 is fixed.
+~~> Rationale: works around anthropics/claude-code#95982 by putting auto mode on~~
+~~> its billed classifier fallback. Claude Code 2.1.327 announced that fallback's~~
+~~> removal, so this requirement expires with it; retire it once #95982 is fixed.~~
+
+_Retired 2026-11-24: moved to [CLAUDE-03](#claude-03). The ID is not reused._
 
 #### `PIN-12`
 The system shall mark each pinned plugin with 📌 in front of its name wherever
@@ -369,40 +373,40 @@ pin it for the row's plugin, refusing a folder that holds no plugin manifest or
 holds another plugin's and saying why, and close the browser on escape or a
 click on its ✕.
 
-### `SANDBOX`
-Sandbox
-
-#### `SANDBOX-01`
-Where a launch passes `--sandbox`, the system shall start Claude Code with the
-sandbox on, running sandboxed commands without a permission prompt, failing if
-the sandbox is unavailable and allowing no unsandboxed commands.
+_No SANDBOX category: retired 2026-11-24, when SANDBOX-01 moved to CLAUDE-04, since the
+sandbox is Claude Code's. The ID is not reused._
 
 ### `LAUNCH`
 Launch
 
 #### `LAUNCH-01`
-The system shall pass every argument it does not consume to Claude Code
+The system shall pass every argument it does not consume to the tool
 unchanged.
 
 #### `LAUNCH-02`
 When a launch starts, the system shall print the rigs, the rule that made each
-rig a default, the pins, and the sandbox state before Claude Code starts.
+rig a default, the pins, and the sandbox state (Claude Code) or the tool's name
+(Grok Build) before the tool starts.
 
 #### `LAUNCH-03`
 When the user runs `rig` with arguments that start with an option or a prompt
 of more than one word, the system shall launch the default rig and pass the
-arguments to Claude Code; if they start with a single word that is neither
-rig's command nor Claude Code's, then the system shall refuse it as an unknown
+arguments to the tool; if they start with a single word that is neither
+rig's command nor the tool's, then the system shall refuse it as an unknown
 command.
 
-#### `LAUNCH-04`
-When the first argument is a Claude Code subcommand, the system shall run
-Claude Code with the arguments unchanged, without loading a rig.
+#### ~~`LAUNCH-04`~~
+~~When the first argument is a Claude Code subcommand, the system shall run~~
+~~Claude Code with the arguments unchanged, without loading a rig.~~
+
+_Retired 2026-11-24: moved to [TOOL-03](#tool-03). The ID is not reused._
 
 #### `LAUNCH-05`
 When an interactive launch has arguments and no `--select`, the system shall
 launch without the picker, whatever it has to install or pins to choose, each
-pin loading as the picker would offer it. When the picker opens on a launch
+pin loading as the picker would offer it, unless a pin it would load holds the
+working directory or sits inside it: then it shall open the picker first, since
+the session would run on the files it edits. When the picker opens on a launch
 with a plugin to install or a pin to choose, it shall start with its cursor on
 the first pin to choose, else the first plugin to install, and a notice naming
 each: a pin that holds the working directory and whether its checkout loads, a
@@ -463,10 +467,12 @@ the system shall put the session's rigs on beacon's pane badge, separated by
 If the terminal goes away while the picker or the rig editor is open, then the system shall exit as a hangup ends it, even when it
 started with SIGHUP ignored.
 
-#### `LAUNCH-16`
-If a launch's arguments carry, before any `--`, an option that neither rig nor
-Claude Code's `--help` lists, then the system shall refuse the launch before
-the picker opens, naming the option.
+#### ~~`LAUNCH-16`~~
+~~If a launch's arguments carry, before any `--`, an option that neither rig nor~~
+~~Claude Code's `--help` lists, then the system shall refuse the launch before~~
+~~the picker opens, naming the option.~~
+
+_Retired 2026-11-24: moved to [TOOL-04](#tool-04). The ID is not reused._
 
 #### `LAUNCH-17`
 While the picker or the rig editor shows a message, the system shall take the
@@ -474,7 +480,7 @@ message away on escape, leaving the picker or editor open; with no message on
 show, escape refuses the picker's launch.
 
 ### `SWITCH`
-Switching rigs mid-session
+Switching rigs mid-session, in Claude Code
 
 #### `SWITCH-01`
 When the user runs `/rig <rig>...` in a session rig launched at a
@@ -519,6 +525,113 @@ launch before it passed through, each with its values as `claude --help` says
 it takes them, leaving out the prompt, anything after `--`, and the options that
 pick or start a conversation.
 
+### `TOOL`
+The tool a launch starts
+
+#### `TOOL-01`
+The system shall launch Claude Code unless the user runs `rig grok`, reading the
+same rig definitions and pins whichever tool a launch starts.
+
+#### `TOOL-02`
+When the user runs `rig claude` or `rig grok`, the system shall treat the
+arguments that follow as arguments to `rig`, launching that tool with the
+default rigs when none follow.
+
+#### `TOOL-03`
+When the first argument is a command the tool's `--help` lists, the system
+shall run the tool with the arguments unchanged, without loading a rig.
+
+#### `TOOL-04`
+If a launch's arguments carry, before any `--`, an option that neither rig nor
+the tool's `--help` lists, then the system shall refuse the launch before the
+picker opens, naming the option.
+
+#### `TOOL-05`
+Where no other shell function defines `claude`, the install shall make `claude`
+run `rig claude`; and where Grok Build is on PATH and no other shell function
+defines `grok`, make `grok` run `rig grok`.
+
+### `CLAUDE`
+Launching Claude Code
+
+#### `CLAUDE-01`
+When a Claude Code launch uses rigs, the system shall start Claude Code with their
+plugins enabled for that session, setting no other plugin's state apart from
+pins, so a plugin enabled during the session loads. A rig plugin that a project
+settings file covering the working directory sets to `false` is left to the
+settings files and named on the launch summary, unless the user picked it on
+its own; a `false` in the user's settings file does not keep it out.
+
+#### `CLAUDE-02`
+When a Claude Code launch starts, the system shall turn off each plugin the user's Claude
+Code settings file enables, naming the ones the launch's rigs don't include.
+
+#### `CLAUDE-03`
+Where a launch loads a pin whose checkout holds the working directory or sits
+inside it, the system shall start Claude Code with
+`CLAUDE_CODE_AUTO_MODE_SERVER=0`, unless the environment already sets it, and
+say so before Claude Code starts.
+
+> Rationale: works around anthropics/claude-code#95982 by putting auto mode on
+> its billed classifier fallback. Claude Code 2.1.327 announced that fallback's
+> removal, so this requirement expires with it; retire it once #95982 is fixed.
+
+#### `CLAUDE-04`
+Where a Claude Code launch passes `--sandbox`, the system shall start Claude Code with the
+sandbox on, running sandboxed commands without a permission prompt, failing if
+the sandbox is unavailable and allowing no unsandboxed commands.
+
+### `GROK`
+Launching Grok Build
+
+#### `GROK-01`
+When a launch starts Grok Build, the system shall start it with a grok home of
+its own for that launch, linking each entry of the user's grok home other than
+`config.toml` and `plugins`, so the launch writes no file another grok session
+reads.
+
+#### `GROK-02`
+When a launch starts Grok Build, the system shall write the launch's
+`config.toml` as the user's, with its `[plugins]` table replaced by one that
+enables each of the launch's plugins by its name without the marketplace.
+
+#### `GROK-03`
+When a launch starts Grok Build, the system shall fill the launch's `plugins`
+folder with a link to each entry of the user's grok `plugins` folder and, for
+each pin the launch loads, a link to its checkout under the plugin's name,
+standing in for the installed copy.
+
+#### `GROK-04`
+When Grok Build exits, the system shall carry each file the session wrote in
+the launch's grok home back to the user's: a changed `config.toml` with the
+user's own `[plugins]` table kept, and each other entry the session created or
+replaced; then remove the launch's grok home and exit with Grok Build's exit
+status.
+
+#### `GROK-05`
+If the user's `config.toml` changed while a Grok Build launch ran, and the
+session changed the launch's copy too, then the system shall leave the user's
+file as it is, keep the session's copy beside it, and name both.
+
+#### `GROK-06`
+When a launch starts Grok Build, the system shall pass `--sandbox` to it as
+Grok Build's own option, with its value.
+
+#### `GROK-07`
+While a launch starts Grok Build, the system shall leave Claude Code's settings
+files unchanged and set no Claude Code environment variable.
+
+#### `GROK-08`
+If Grok Build doesn't load one of a launch's plugins, as `grok inspect` reports
+in the launch's grok home, then the system shall name it before Grok Build
+starts.
+
+#### `GROK-09`
+When a launch starts Grok Build, the system shall put its grok home at the
+first numbered path no running Grok Build launch holds, so a later launch
+reuses the path, and a command grok remembers as always allowed from a pinned
+plugin keeps applying.
+
 ### `SHELL`
 Shell integration
 
@@ -534,9 +647,11 @@ the one installed, the system shall tell the user to run `/rig:install-rig`.
 The system shall accept `rig rig <command>` as `rig <command>`, and `rig plugin
 pin|unpin` as `rig pin|unpin`, so `rig` can stand in for `claude`.
 
-#### `SHELL-04`
-Where no other shell function defines `claude`, the install shall make `claude`
-run `rig claude`.
+#### ~~`SHELL-04`~~
+~~Where no other shell function defines `claude`, the install shall make `claude`~~
+~~run `rig claude`.~~
+
+_Retired 2026-11-24: moved to [TOOL-05](#tool-05). The ID is not reused._
 
 #### `SHELL-05`
 When the user runs `rig` with no arguments and someone is at a terminal, the
@@ -544,9 +659,11 @@ system shall launch as `rig --select` does, opening first-run setup first when
 no rigs are defined; with no one at a terminal, it shall print its usage without
 launching Claude Code.
 
-#### `SHELL-06`
-When the user runs `rig claude`, the system shall treat the arguments that
-follow as arguments to `rig`, launching the default rig when none follow.
+#### ~~`SHELL-06`~~
+~~When the user runs `rig claude`, the system shall treat the arguments that~~
+~~follow as arguments to `rig`, launching the default rig when none follow.~~
+
+_Retired 2026-11-24: moved to [TOOL-02](#tool-02). The ID is not reused._
 
 ### `TAB`
 Tab completion

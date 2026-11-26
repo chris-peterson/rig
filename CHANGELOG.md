@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Grok Build support.** `grok`, or `rig grok`, launches Grok Build with the
+  same rigs, folder rules, picker, and pins as `claude`. Grok loads the plugins
+  Claude Code installed, by name. Grok has no per-session plugin switch, so
+  each launch gets a grok home of its own under `~/.rig/grok/`, with a
+  `config.toml` that turns on the launch's plugins and a `plugins/` folder
+  holding your pins; your `~/.grok/config.toml` isn't written for a launch.
+  What the session writes there, such as a `/settings` change or a refreshed
+  sign-in, is carried back when grok exits. rig names any rig plugin grok
+  doesn't load before it starts. `/rig:install-rig` makes `grok` run rig when
+  grok is on your PATH. `/rig` switching is Claude Code only. The new
+  *Supported tools* page lists what each tool gets.
 - **rig 1.0.** The [docs](https://chris-peterson.github.io/rig) are rewritten
   around what rig is for: switching Claude Code between groups of plugins, so
   each session loads only the plugins its work needs. The home page says why
@@ -17,12 +28,12 @@
   directly, and the editor takes up what you save there, unless it has unsaved
   changes of its own, which it keeps and warns about.
 - A launch with arguments, including plain `claude`, no longer opens the
-  picker on its own when it has a plugin to install or a pin to choose. It
-  installs what the rigs need and loads each pin as the picker would have
-  offered it: a pin holding the folder you start in loads, and a pin your rigs
-  leave out stays out. The launch summary says which. `rig` alone and
-  `--select` still open the picker, with the same notice when there's
-  something to decide.
+  picker on its own when it has a plugin to install or a pin your rigs leave
+  out. It installs what the rigs need and leaves that pin out, and the launch
+  summary says so. It still stops at the picker when it would load a pin whose
+  checkout you're starting in, or above, since the session would edit the
+  files it runs on. `rig` alone and `--select` still open the picker, with the
+  same notice when there's something to decide.
 - **The launch key is now `g`, not `l`**, in the `--select` picker, and the
   `/rig` pane switches on `g` too. `l` now moves right, so the picker moves
   with `h` `j` `k` `l` as well as the arrow keys. The `/rig` pane's footer
