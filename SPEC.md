@@ -460,8 +460,13 @@ Textual's animations are off, that launches on a click.
 
 #### `LAUNCH-14`
 Where beacon is installed, when a session rig launched at a terminal starts,
-the system shall put the session's rigs on beacon's pane badge, separated by
-` ✦ `.
+the system shall put the project's name on beacon's pane badge, followed by
+` · ` and the session's rigs separated by ` ✦ `. The project's name is the last
+segment of the origin remote's URL, else the git repository's folder name, else
+the working folder's name, as beacon names it.
+
+Rationale: a caller's badge replaces beacon's own `project · task` text, so the
+rigs alone would leave the pane without saying which project it is in.
 
 #### `LAUNCH-15`
 If the terminal goes away while the picker or the rig editor is open, then the system shall exit as a hangup ends it, even when it

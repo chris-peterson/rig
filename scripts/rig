@@ -3139,17 +3139,37 @@ def cmd_freshness(args: list[str]) -> int:
 
 
 BADGE_SEPARATOR = " ✦ "
+BADGE_PROJECT_SEPARATOR = " · "
+
+
+def badge_project(cwd: Path) -> str:
+    """LAUNCH-14: the project's name as beacon derives it: the last segment of the origin remote, else the git
+    repository's folder, else the working folder."""
+    def git(*args: str) -> str:
+        try:
+            out = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        return out.stdout.strip() if out.returncode == 0 else ""
+    remote = re.sub(r"\.git$", "", git("config", "remote.origin.url").rstrip("/"))
+    name = re.split(r"[/:]", remote)[-1] if remote else ""
+    return name or Path(git("rev-parse", "--show-toplevel") or cwd).name
 
 
 def cmd_badge(args: list[str]) -> int:
-    """LAUNCH-14: put the rigs a session launched with on beacon's pane badge, when beacon is installed."""
+    """LAUNCH-14: put the project and the rigs a session launched with on beacon's pane badge, when beacon is
+    installed."""
     import shutil
     rigs = os.environ.get(CURRENT_RIG_ENV, "").split()
     beacon = shutil.which("beacon")
     if not rigs or beacon is None:
         return 0
+    text = BADGE_SEPARATOR.join(rigs)
+    project = badge_project(Path.cwd())
+    if project:
+        text = project + BADGE_PROJECT_SEPARATOR + text
     try:
-        subprocess.run([beacon, "badge", BADGE_SEPARATOR.join(rigs)], stdin=subprocess.DEVNULL,
+        subprocess.run([beacon, "badge", text], stdin=subprocess.DEVNULL,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         pass

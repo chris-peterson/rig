@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The beacon pane badge leads with the project's name, `rig · web ✦ docs`,
+  since rig's badge takes the place of beacon's own project label.
 - **Grok Build support.** `grok`, or `rig grok`, launches Grok Build with the
   same rigs, folder rules, picker, and pins as `claude`. Grok loads the plugins
   Claude Code installed, by name. Grok has no per-session plugin switch, so

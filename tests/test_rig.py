@@ -885,14 +885,42 @@ class Badge(RigCase):
             return []
         return [json.loads(line) for line in self.beacon_log.read_text().splitlines()]
 
-    def test_launch_14_badge_names_the_rigs(self):
-        result = self.rig("badge", env={"RIG_CURRENT": "web docs"})
+    def project(self, name: str, remote: str | None = None) -> Path:
+        folder = self.home / name
+        folder.mkdir()
+        subprocess.run(["git", "init", "-q", str(folder)], check=True)
+        if remote:
+            subprocess.run(["git", "-C", str(folder), "remote", "add", "origin", remote], check=True)
+        return folder
+
+    def test_launch_14_badge_names_the_project_and_rigs(self):
+        result = self.rig("badge", cwd=self.project("shop"), env={"RIG_CURRENT": "web docs"})
         self.assertEqual((result.returncode, result.stdout), (0, ""))
-        self.assertEqual(self.beacon_calls(), [["badge", "web ✦ docs"]])
+        self.assertEqual(self.beacon_calls(), [["badge", "shop · web ✦ docs"]])
 
     def test_launch_14_badge_names_base_alone(self):
-        self.rig("badge", env={"RIG_CURRENT": "base"})
-        self.assertEqual(self.beacon_calls(), [["badge", "base"]])
+        self.rig("badge", cwd=self.project("shop"), env={"RIG_CURRENT": "base"})
+        self.assertEqual(self.beacon_calls(), [["badge", "shop · base"]])
+
+    def test_launch_14_badge_project_from_the_origin_remote(self):
+        folder = self.project("checkout", remote="git@github.com:acme/storefront.git")
+        (folder / "src").mkdir()
+        self.rig("badge", cwd=folder / "src", env={"RIG_CURRENT": "web"})
+        self.rig("badge", cwd=self.project("other", remote="https://gitlab.com/acme/group/billing"),
+                 env={"RIG_CURRENT": "web"})
+        self.assertEqual(self.beacon_calls(), [["badge", "storefront · web"], ["badge", "billing · web"]])
+
+    def test_launch_14_badge_project_from_the_repository_folder(self):
+        folder = self.project("shop")
+        (folder / "src").mkdir()
+        self.rig("badge", cwd=folder / "src", env={"RIG_CURRENT": "web"})
+        self.assertEqual(self.beacon_calls(), [["badge", "shop · web"]])
+
+    def test_launch_14_badge_project_outside_a_repository(self):
+        folder = Path(self._tmp.name) / "loose"
+        folder.mkdir()
+        self.rig("badge", cwd=folder, env={"RIG_CURRENT": "web"})
+        self.assertEqual(self.beacon_calls(), [["badge", "loose · web"]])
 
     def test_launch_14_no_badge_outside_a_rig_launch(self):
         result = self.rig("badge")
@@ -908,8 +936,8 @@ class Badge(RigCase):
         env = {**self.env, "CLAUDE_PLUGIN_ROOT": str(RIG.parent.parent)}
         subprocess.run(["bash", str(RIG.parent.parent / "hooks" / "beacon-badge.sh")], env=env, check=True)
         subprocess.run(["bash", str(RIG.parent.parent / "hooks" / "beacon-badge.sh")],
-                       env={**env, "RIG_CURRENT": "web"}, check=True)
-        self.assertEqual(self.beacon_calls(), [["badge", "web"]])
+                       env={**env, "RIG_CURRENT": "web"}, cwd=self.project("shop"), check=True)
+        self.assertEqual(self.beacon_calls(), [["badge", "shop · web"]])
 
 
 class Doctor(RigCase):
