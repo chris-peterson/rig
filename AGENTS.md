@@ -37,8 +37,7 @@ scripts/rig              the CLI, one Python file run through `uv run --script`;
 scripts/trial-off.sh     what `just trial-off` runs: reinstalls the CLI from the newest plugin build
 commands/install-rig.md  the bootstrap that puts `rig` on PATH
 hooks/switch.ts          the mod behind /rig: the picker in a pane, then `rig switch` and an exit
-hooks/hooks.yml          hook source; cli-freshness.sh reports a stale `rig` on PATH,
-                         beacon-badge.sh puts the rigs on beacon's pane badge
+hooks/hooks.yml          hook source; cli-freshness.sh reports a stale `rig` on PATH
 tests/                   unittest suite; a test covering a requirement names its ID
 dev/demo.py              what `just demo` runs
 dev/screenshots.py       what `just screenshots` runs: the docs' SVGs of the picker and editor

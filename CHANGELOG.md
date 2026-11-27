@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- rig no longer puts a session's rigs on beacon's pane badge at startup, so
+  beacon shows its own `project · task` label again. Run `/rig` to see which
+  rigs a session has.
+
 ## 1.0.0
 
 - The beacon pane badge leads with the project's name, `rig · web ✦ docs`,
